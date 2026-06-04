@@ -1,0 +1,62 @@
+{
+  "name": "openapi-to-mcp",
+  "version": "0.1.0",
+  "description": "Generate MCP servers from OpenAPI 3.x specifications",
+  "type": "module",
+  "bin": {
+    "openapi-to-mcp": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/cli.js",
+    "test": "bun test",
+    "lint": "biome check src/",
+    "format": "biome format --write src/",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "openapi",
+    "mcp",
+    "model-context-protocol",
+    "code-generator",
+    "ai",
+    "claude",
+    "cursor",
+    "typescript"
+  ],
+  "author": "devla",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/devladpopov/openapi-to-mcp.git"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "files": [
+    "dist/",
+    "templates/",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "commander": "^15.0.0",
+    "yaml": "^2.9.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.16",
+    "@types/node": "^25.9.1",
+    "typescript": "^6.0.3"
+  }
+}
