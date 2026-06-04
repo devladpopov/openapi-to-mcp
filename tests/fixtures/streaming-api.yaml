@@ -1,0 +1,46 @@
+openapi: "3.0.3"
+info:
+  title: Streaming API
+  version: "1.0.0"
+servers:
+  - url: https://stream.example.com
+paths:
+  /events/stream:
+    get:
+      operationId: streamEvents
+      summary: Stream events via SSE
+      parameters:
+        - name: channel
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: SSE stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+  /logs/stream:
+    get:
+      operationId: streamLogs
+      summary: Stream logs via NDJSON
+      responses:
+        "200":
+          description: NDJSON stream
+          content:
+            application/x-ndjson:
+              schema:
+                type: string
+  /data:
+    get:
+      operationId: getData
+      summary: Regular JSON endpoint
+      responses:
+        "200":
+          description: JSON data
+          content:
+            application/json:
+              schema:
+                type: object

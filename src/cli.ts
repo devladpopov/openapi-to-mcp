@@ -1,21 +1,20 @@
 #!/usr/bin/env node
 
 import { Command } from "commander";
-import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { generate } from "./generator/index.js";
 import { parseSpec } from "./parser/index.js";
 import { mapToMcpTools } from "./mapper/index.js";
 import type { OpenApiSpec } from "./types.js";
 
-const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf-8"));
+const VERSION = "0.2.0";
 
 const program = new Command();
 
 program
 	.name("openapi-to-mcp")
 	.description("Generate MCP servers from OpenAPI 3.x specifications")
-	.version(pkg.version);
+	.version(VERSION);
 
 program
 	.command("generate")
@@ -24,7 +23,7 @@ program
 	.option("-o, --output <dir>", "Output directory", "./mcp-server")
 	.option("-n, --name <name>", "Server name (defaults to spec title)")
 	.option("--transport <type>", "Transport: stdio | streamable-http", "stdio")
-	.option("--auth <type>", "Auth: none | api-key | bearer | oauth2", "none")
+	.option("--auth <type>", "Auth: none | api-key | bearer | oauth2 | oauth2-auth-code", "none")
 	.option("--include-tags <tags>", "Only include operations with these tags (comma-separated)")
 	.option("--exclude-tags <tags>", "Exclude operations with these tags (comma-separated)")
 	.option("--dry-run", "Print tool definitions without generating files")
@@ -61,13 +60,17 @@ program
 		}
 	});
 
-function detectAuth(spec: OpenApiSpec): "none" | "api-key" | "bearer" | "oauth2" {
+function detectAuth(spec: OpenApiSpec): "none" | "api-key" | "bearer" | "oauth2" | "oauth2-auth-code" {
 	const schemes = Object.values(spec.components?.securitySchemes ?? {});
 	if (schemes.length === 0) return "none";
 	const first = schemes[0];
 	if (first.type === "apiKey") return "api-key";
 	if (first.type === "http" && first.scheme === "bearer") return "bearer";
-	if (first.type === "oauth2") return "oauth2";
+	if (first.type === "oauth2") {
+		// Prefer authorization_code if available
+		if (first.flows?.authorizationCode) return "oauth2-auth-code";
+		return "oauth2";
+	}
 	return "none";
 }
 

@@ -82,6 +82,13 @@ function generateEnvExample(opts: GenerateOptions): string {
 		lines.push("OAUTH_CLIENT_ID=");
 		lines.push("OAUTH_CLIENT_SECRET=");
 		lines.push("OAUTH_TOKEN_URL=");
+	} else if (opts.auth === "oauth2-auth-code") {
+		lines.push("OAUTH_CLIENT_ID=");
+		lines.push("OAUTH_CLIENT_SECRET=");
+		lines.push("OAUTH_AUTH_URL=");
+		lines.push("OAUTH_TOKEN_URL=");
+		lines.push("OAUTH_SCOPES=");
+		lines.push("OAUTH_REDIRECT_PORT=8976");
 	}
 
 	return lines.join("\n") + "\n";

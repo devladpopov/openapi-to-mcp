@@ -1,0 +1,61 @@
+openapi: "3.0.3"
+info:
+  title: OAuth2 API
+  version: "1.0.0"
+servers:
+  - url: https://api.example.com
+security:
+  - oauth2:
+      - read
+      - write
+paths:
+  /me:
+    get:
+      operationId: getProfile
+      summary: Get current user profile
+      responses:
+        "200":
+          description: User profile
+  /posts:
+    post:
+      operationId: createPost
+      summary: Create a new post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - title
+              properties:
+                title:
+                  type: string
+                body:
+                  type: string
+      responses:
+        "201":
+          description: Created
+  /public:
+    get:
+      operationId: getPublicData
+      summary: Public endpoint (no auth)
+      security: []
+      responses:
+        "200":
+          description: Public data
+components:
+  securitySchemes:
+    oauth2:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://auth.example.com/authorize
+          tokenUrl: https://auth.example.com/token
+          scopes:
+            read: Read access
+            write: Write access
+        clientCredentials:
+          tokenUrl: https://auth.example.com/token
+          scopes:
+            read: Read access

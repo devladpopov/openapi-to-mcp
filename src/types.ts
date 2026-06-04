@@ -11,6 +11,7 @@ export interface OpenApiSpec {
 		schemas?: Record<string, JsonSchema>;
 		securitySchemes?: Record<string, SecurityScheme>;
 	};
+	security?: Array<Record<string, string[]>>;
 }
 
 export interface PathItem {
@@ -34,6 +35,18 @@ export interface Operation {
 	"x-mcp-exclude"?: boolean;
 	"x-mcp-name"?: string;
 	"x-mcp-description"?: string;
+	"x-mcp-pagination"?: PaginationHint;
+}
+
+export interface PaginationHint {
+	type: "offset" | "page" | "cursor";
+	limitParam?: string;
+	offsetParam?: string;
+	pageParam?: string;
+	cursorParam?: string;
+	cursorPath?: string;
+	totalPath?: string;
+	itemsPath?: string;
 }
 
 export interface Parameter {
@@ -97,7 +110,21 @@ export interface McpToolDefinition {
 		path: string;
 		tags: string[];
 		auth: SecurityScheme | null;
+		pagination: PaginationConfig | null;
+		streaming: boolean;
 	};
+}
+
+export interface PaginationConfig {
+	type: "offset" | "page" | "cursor";
+	limitParam: string;
+	offsetParam?: string;
+	pageParam?: string;
+	cursorParam?: string;
+	cursorPath: string;
+	totalPath: string;
+	itemsPath: string;
+	defaultLimit: number;
 }
 
 export interface MapperOptions {
@@ -105,7 +132,10 @@ export interface MapperOptions {
 	includeTags?: string[];
 	excludeTags?: string[];
 	excludeOperations?: string[];
+	detectPagination?: boolean;
 }
+
+export type AuthMode = "none" | "api-key" | "bearer" | "oauth2" | "oauth2-auth-code";
 
 export interface GenerateOptions {
 	tools: McpToolDefinition[];
@@ -113,5 +143,5 @@ export interface GenerateOptions {
 	outputDir: string;
 	serverName: string;
 	transport: "stdio" | "streamable-http";
-	auth: "none" | "api-key" | "bearer" | "oauth2";
+	auth: AuthMode;
 }

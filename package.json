@@ -1,22 +1,30 @@
 {
   "name": "openapi-to-mcp",
-  "version": "0.1.0",
-  "description": "Generate MCP servers from OpenAPI 3.x specifications",
+  "version": "0.2.0",
+  "description": "Generate MCP servers from OpenAPI 3.x specifications. One command, working server.",
   "type": "module",
   "bin": {
     "openapi-to-mcp": "./dist/cli.js"
   },
-  "main": "./dist/index.js",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     }
   },
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
+    "build": "tsup && tsc -p tsconfig.build.json && node -e \"require('fs').copyFileSync('dist/index.d.ts','dist/index.d.cts')\"",
+    "build:check": "tsc --noEmit",
+    "dev": "tsup --watch",
     "start": "node dist/cli.js",
     "test": "bun test",
     "lint": "biome check src/",
@@ -28,13 +36,23 @@
     "mcp",
     "model-context-protocol",
     "code-generator",
+    "codegen",
     "ai",
     "claude",
     "cursor",
-    "typescript"
+    "chatgpt",
+    "typescript",
+    "api",
+    "oauth2",
+    "rest",
+    "swagger"
   ],
-  "author": "devla",
+  "author": "Vlad Popov <devladpopov@gmail.com>",
   "license": "MIT",
+  "homepage": "https://github.com/devladpopov/openapi-to-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/devladpopov/openapi-to-mcp/issues"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/devladpopov/openapi-to-mcp.git"
@@ -44,7 +62,6 @@
   },
   "files": [
     "dist/",
-    "templates/",
     "README.md",
     "LICENSE"
   ],
@@ -57,6 +74,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.4.16",
     "@types/node": "^25.9.1",
+    "tsup": "^8.5.1",
     "typescript": "^6.0.3"
   }
 }

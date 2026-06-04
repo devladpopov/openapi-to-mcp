@@ -1,0 +1,101 @@
+openapi: "3.0.3"
+info:
+  title: Paginated API
+  version: "1.0.0"
+servers:
+  - url: https://api.example.com
+paths:
+  /items:
+    get:
+      operationId: listItems
+      summary: List items with offset pagination
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          schema:
+            type: integer
+        - name: category
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Paginated items
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                  total:
+                    type: integer
+  /users:
+    get:
+      operationId: listUsers
+      summary: List users with page pagination
+      parameters:
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+        - name: page
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Paginated users
+  /events:
+    get:
+      operationId: listEvents
+      summary: List events with cursor pagination
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: after
+          in: query
+          description: Cursor for next page
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Events with cursor
+  /messages:
+    get:
+      operationId: listMessages
+      summary: List messages with explicit pagination hint
+      x-mcp-pagination:
+        type: offset
+        limitParam: count
+        offsetParam: skip
+        itemsPath: data
+        totalPath: total_count
+        cursorPath: next
+      parameters:
+        - name: count
+          in: query
+          schema:
+            type: integer
+        - name: skip
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Messages
+  /simple:
+    get:
+      operationId: getSimple
+      summary: Simple endpoint without pagination
+      responses:
+        "200":
+          description: Simple response

@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "declarationMap": true,
+    "outDir": "dist"
+  },
+  "include": ["src/index.ts", "src/types.ts", "src/parser/index.ts", "src/mapper/index.ts", "src/generator/index.ts"]
+}
