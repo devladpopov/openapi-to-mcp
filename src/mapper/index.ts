@@ -122,7 +122,9 @@ function buildInputSchema(op: Operation, pathParams?: Parameter[]): JsonSchema {
 }
 
 function resolveAuth(spec: OpenApiSpec, op: Operation): SecurityScheme | null {
-	const securityReqs = op.security ?? [];
+	// Operation-level security overrides global
+	const globalSecurity = (spec as unknown as Record<string, unknown>).security as Array<Record<string, string[]>> | undefined;
+	const securityReqs = op.security ?? globalSecurity ?? [];
 	if (securityReqs.length === 0) return null;
 
 	const schemeName = Object.keys(securityReqs[0])[0];

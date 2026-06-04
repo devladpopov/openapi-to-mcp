@@ -22,6 +22,7 @@ export async function generate(opts: GenerateOptions): Promise<void> {
 				},
 				dependencies: {
 					"@modelcontextprotocol/sdk": "^1.29.0",
+					zod: "^3.23.0",
 				},
 				devDependencies: {
 					typescript: "^5.7.0",

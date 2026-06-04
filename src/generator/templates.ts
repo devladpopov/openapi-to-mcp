@@ -58,10 +58,14 @@ function renderAuthHelper(opts: GenerateOptions): string {
 }`;
 	}
 	if (opts.auth === "api-key") {
+		// Detect header name from spec's securitySchemes
+		const apiKeyScheme = Object.values(opts.spec.components?.securitySchemes ?? {})
+			.find((s) => s.type === "apiKey");
+		const headerName = apiKeyScheme?.name ?? "X-API-Key";
 		return `function authHeaders(): Record<string, string> {
 	const key = process.env.API_KEY;
 	if (!key) throw new Error("API_KEY environment variable is required");
-	return { "Authorization": \`Bearer \${key}\` };
+	return { ${JSON.stringify(headerName)}: key };
 }`;
 	}
 	if (opts.auth === "bearer") {
