@@ -112,4 +112,71 @@ describe("streamable HTTP transport generation", () => {
 		expect(code).toContain("createServer");
 		expect(code).not.toContain("StdioServerTransport");
 	});
+
+	test("handleRequest receives req and res (SDK signature)", async () => {
+		const spec = await parseSpec(fixture);
+		const tools = mapToMcpTools(spec);
+		await generate({
+			tools, spec, outputDir,
+			serverName: "HTTP Test", transport: "streamable-http", auth: "none",
+		});
+
+		const code = readFileSync(join(outputDir, "src/server.ts"), "utf-8");
+		expect(code).toContain("transport.handleRequest(req, res)");
+	});
+});
+
+describe("generated handler correctness (regressions)", () => {
+	let outputDir: string;
+
+	beforeEach(() => {
+		outputDir = mkdtempSync(join(tmpdir(), "openapi-to-mcp-reg-"));
+	});
+
+	afterEach(() => {
+		if (existsSync(outputDir)) rmSync(outputDir, { recursive: true });
+	});
+
+	test("handlers receive parsed args directly, not destructured { params }", async () => {
+		const spec = await parseSpec(resolve(import.meta.dir, "fixtures/petstore.yaml"));
+		const tools = mapToMcpTools(spec);
+		await generate({
+			tools, spec, outputDir,
+			serverName: "Test", transport: "stdio", auth: "none",
+		});
+
+		const code = readFileSync(join(outputDir, "src/server.ts"), "utf-8");
+		// MCP SDK passes parsed zod args as the first handler argument directly
+		expect(code).not.toContain("async ({ params })");
+		expect(code).toContain("async (params)");
+	});
+
+	test("request body excludes path params", async () => {
+		const spec = await parseSpec(resolve(import.meta.dir, "fixtures/petstore.yaml"));
+		const tools = mapToMcpTools(spec);
+		await generate({
+			tools, spec, outputDir,
+			serverName: "Test", transport: "stdio", auth: "none",
+		});
+
+		const code = readFileSync(join(outputDir, "src/server.ts"), "utf-8");
+		expect(code).not.toContain("body: JSON.stringify(params)");
+	});
+
+	test("all imports are at the top of the generated file", async () => {
+		const spec = await parseSpec(resolve(import.meta.dir, "fixtures/oauth2-api.yaml"));
+		const tools = mapToMcpTools(spec);
+		await generate({
+			tools, spec, outputDir,
+			serverName: "Test", transport: "streamable-http", auth: "oauth2-auth-code",
+		});
+
+		const code = readFileSync(join(outputDir, "src/server.ts"), "utf-8");
+		const lines = code.split("\n");
+		const lastImport = lines.reduce((acc, l, i) => (l.startsWith("import ") ? i : acc), 0);
+		const firstNonImport = lines.findIndex(
+			(l) => l.trim() !== "" && !l.startsWith("import "),
+		);
+		expect(lastImport).toBeLessThan(firstNonImport);
+	});
 });

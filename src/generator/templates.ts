@@ -34,9 +34,7 @@ function buildServerSetup(opts: GenerateOptions): string {
 main().catch(console.error);`;
 	}
 	// Streamable HTTP
-	return `import { createServer } from "node:http";
-
-const PORT = parseInt(process.env.PORT ?? "3000", 10);
+	return `const PORT = parseInt(process.env.PORT ?? "3000", 10);
 
 async function main() {
 	const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
@@ -44,15 +42,16 @@ async function main() {
 
 	const httpServer = createServer(async (req, res) => {
 		const url = new URL(req.url ?? "/", \`http://\${req.headers.host}\`);
-		if (url.pathname === "/mcp" && req.method === "POST") {
-			const body = await new Promise<string>((resolve) => {
-				let data = "";
-				req.on("data", (chunk: Buffer) => { data += chunk.toString(); });
-				req.on("end", () => resolve(data));
-			});
-			const response = await transport.handleRequest(JSON.parse(body));
-			res.writeHead(200, { "Content-Type": "application/json" });
-			res.end(JSON.stringify(response));
+		if (url.pathname === "/mcp") {
+			try {
+				await transport.handleRequest(req, res);
+			} catch (err) {
+				console.error("Error handling MCP request:", err);
+				if (!res.headersSent) {
+					res.writeHead(500, { "Content-Type": "application/json" });
+					res.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32603, message: "Internal server error" }, id: null }));
+				}
+			}
 		} else {
 			res.writeHead(404);
 			res.end("Not found");
@@ -79,10 +78,18 @@ function buildImports(opts: GenerateOptions): string {
 	} else {
 		lines.push(
 			`import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";`,
+			`import { createServer } from "node:http";`,
 		);
 	}
 
 	lines.push(`import { z } from "zod";`);
+
+	if (opts.auth === "oauth2-auth-code") {
+		lines.push(
+			`import { createServer as createHttpServer } from "node:http";`,
+			`import { randomBytes, createHash } from "node:crypto";`,
+		);
+	}
 
 	return lines.join("\n");
 }
@@ -163,11 +170,7 @@ function renderOAuth2AuthCodeHelper(opts: GenerateOptions): string {
 	const defaultTokenUrl = flow?.tokenUrl ?? "";
 	const defaultScopes = Object.keys(flow?.scopes ?? {}).join(" ");
 
-	return `import { createServer as createHttpServer } from "node:http";
-import { randomBytes, createHash } from "node:crypto";
-import { URL, URLSearchParams } from "node:url";
-
-interface TokenStore {
+	return `interface TokenStore {
 	accessToken: string;
 	refreshToken?: string;
 	expiresAt: number;
@@ -368,12 +371,12 @@ function renderSimpleToolHandler(tool: McpToolDefinition, authMode: AuthMode): s
 	${JSON.stringify(tool.name)},
 	${JSON.stringify(tool.description)},
 	${zodSchema},
-	async ({ params }) => {
+	async (params) => {
 		const url = \`\${API_BASE_URL}${pathInterpolation}\`${renderQueryString(tool)};
 		const headers: Record<string, string> = { ...${authCall}, "Content-Type": "application/json" };
 		const res = await fetch(url, {
 			method: ${JSON.stringify(tool.meta.method)},
-			headers,${hasBody ? '\n\t\t\tbody: JSON.stringify(params),' : ""}
+			headers,${hasBody ? `\n\t\t\tbody: JSON.stringify(Object.fromEntries(Object.entries(params).filter(([k]) => !${JSON.stringify(tool.meta.path)}.includes(\`{\${k}}\`)))),` : ""}
 		});
 		const data = await res.text();
 		return {
@@ -471,7 +474,7 @@ function renderPaginatedToolHandler(tool: McpToolDefinition, authMode: AuthMode)
 	${JSON.stringify(tool.name)},
 	${JSON.stringify(tool.description)},
 	${zodSchema},
-	async ({ params }) => {
+	async (params) => {
 ${paginationLogic}
 		const headers: Record<string, string> = { ...${authCall}, "Content-Type": "application/json" };
 		const res = await fetch(url, { method: "GET", headers });
@@ -506,7 +509,7 @@ function renderStreamingToolHandler(tool: McpToolDefinition, authMode: AuthMode)
 	${JSON.stringify(tool.name)},
 	${JSON.stringify(tool.description + " (streaming)")},
 	${zodSchema},
-	async ({ params }) => {
+	async (params) => {
 		const url = \`\${API_BASE_URL}${pathInterpolation}\`${renderQueryString(tool)};
 		const headers: Record<string, string> = { ...${authCall}, "Accept": "text/event-stream" };
 		const res = await fetch(url, { method: ${JSON.stringify(tool.meta.method)}, headers });
