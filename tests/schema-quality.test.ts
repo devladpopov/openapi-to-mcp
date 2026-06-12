@@ -40,6 +40,22 @@ describe("mapper: param locations and collisions", () => {
 		expect(submitRaw.meta.bodyParams).toEqual([["body", "*"]]);
 	});
 
+	test("form-encoded body detected with form content type", async () => {
+		const spec = await parseSpec(fixture);
+		const tools = mapToMcpTools(spec);
+		const createCharge = tools.find((t) => t.name === "createCharge")!;
+
+		expect(createCharge.meta.bodyContentType).toBe("form");
+		expect(createCharge.meta.bodyMode).toBe("fields");
+		expect(createCharge.inputSchema.required).toEqual(["amount"]);
+	});
+
+	test("json body keeps json content type", async () => {
+		const spec = await parseSpec(fixture);
+		const tools = mapToMcpTools(spec);
+		expect(tools.find((t) => t.name === "updateItem")!.meta.bodyContentType).toBe("json");
+	});
+
 	test("response hint appended to description", async () => {
 		const spec = await parseSpec(fixture);
 		const tools = mapToMcpTools(spec);
@@ -109,6 +125,12 @@ describe("generated code: query/body separation", () => {
 	test("path params are URL-encoded", async () => {
 		const code = await generateCode();
 		expect(code).toContain('encodeURIComponent(String(p["id"] ?? ""))');
+	});
+
+	test("form-encoded body uses formEncode and form content type", async () => {
+		const code = await generateCode();
+		expect(code).toContain("formEncode(pickBody(p,");
+		expect(code).toContain('"Content-Type": "application/x-www-form-urlencoded"');
 	});
 
 	test("whole-body payload sent as-is", async () => {

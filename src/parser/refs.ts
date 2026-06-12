@@ -12,6 +12,10 @@ import type { OpenApiSpec } from "../types.js";
 export function resolveRefs(spec: OpenApiSpec): OpenApiSpec {
 	const root = JSON.parse(JSON.stringify(spec)) as Record<string, unknown>;
 	const MAX_DEPTH = 64;
+	// Memoized resolutions. Without this, specs with heavily shared schemas
+	// (e.g. Stripe: ~500 interconnected components) explode exponentially,
+	// since every reference site would re-inline the whole subtree.
+	const cache = new Map<string, unknown>();
 
 	function lookup(ref: string): unknown {
 		if (!ref.startsWith("#/")) return null;
@@ -42,13 +46,18 @@ export function resolveRefs(spec: OpenApiSpec): OpenApiSpec {
 				// Circular reference: truncate with a permissive placeholder.
 				return { type: "object", description: "(circular reference truncated)" };
 			}
+			if (cache.has(ref)) return cache.get(ref);
 			const target = lookup(ref);
 			if (target === null || target === undefined) {
 				// External or unresolvable ref: strip $ref, keep siblings.
 				const { $ref: _discard, ...rest } = obj;
 				return resolve(rest, stack, depth + 1);
 			}
-			return resolve(target, [...stack, ref], depth + 1);
+			// Depth resets per component so each is resolved consistently;
+			// total nesting stays bounded by cycle detection + memoization.
+			const resolved = resolve(target, [...stack, ref], 0);
+			cache.set(ref, resolved);
+			return resolved;
 		}
 		const out: Record<string, unknown> = {};
 		for (const [k, v] of Object.entries(obj)) {

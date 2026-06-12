@@ -119,6 +119,8 @@ export interface McpToolDefinition {
 		bodyParams: Array<[string, string]>;
 		/** "fields": body assembled from bodyParams; "whole": params.body sent as-is. */
 		bodyMode: "none" | "fields" | "whole";
+		/** How the request body is serialized on the wire. */
+		bodyContentType: "json" | "form";
 	};
 }
 

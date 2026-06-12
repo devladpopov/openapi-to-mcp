@@ -64,7 +64,7 @@ function mapOperation(
 		op["x-mcp-description"] ?? op.summary ?? op.description ?? `${method.toUpperCase()} ${path}`;
 
 	const allParams = mergeParams(pathParams, op.parameters);
-	const { schema: inputSchema, queryParams, bodyParams, bodyMode } = buildInputSchema(op, allParams);
+	const { schema: inputSchema, queryParams, bodyParams, bodyMode, bodyContentType } = buildInputSchema(op, allParams);
 	const auth = resolveAuth(spec, op);
 	const pagination = detectPagination ? detectPaginationConfig(op, allParams) : null;
 	const streaming = isStreamingResponse(op);
@@ -120,6 +120,7 @@ function mapOperation(
 			queryParams: finalQueryParams,
 			bodyParams,
 			bodyMode,
+			bodyContentType,
 		},
 	};
 }
@@ -165,6 +166,7 @@ interface BuiltInput {
 	queryParams: string[];
 	bodyParams: Array<[string, string]>;
 	bodyMode: "none" | "fields" | "whole";
+	bodyContentType: "json" | "form";
 }
 
 function buildInputSchema(op: Operation, params: Parameter[]): BuiltInput {
@@ -186,7 +188,11 @@ function buildInputSchema(op: Operation, params: Parameter[]): BuiltInput {
 		}
 	}
 
-	const bodySchema = op.requestBody?.content?.["application/json"]?.schema;
+	// JSON preferred; fall back to form-encoded (Stripe-style APIs use it exclusively)
+	const content = op.requestBody?.content;
+	const bodySchema = content?.["application/json"]?.schema ?? content?.["application/x-www-form-urlencoded"]?.schema;
+	const bodyContentType: "json" | "form" =
+		!content?.["application/json"] && content?.["application/x-www-form-urlencoded"] ? "form" : "json";
 	if (bodySchema) {
 		if (bodySchema.type === "object" && bodySchema.properties) {
 			bodyMode = "fields";
@@ -224,6 +230,7 @@ function buildInputSchema(op: Operation, params: Parameter[]): BuiltInput {
 		queryParams,
 		bodyParams,
 		bodyMode,
+		bodyContentType,
 	};
 }
 

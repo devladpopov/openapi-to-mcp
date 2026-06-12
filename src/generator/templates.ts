@@ -366,9 +366,12 @@ function renderSimpleToolHandler(tool: McpToolDefinition, authMode: AuthMode): s
 		? ` + buildQuery(p, ${JSON.stringify(tool.meta.queryParams)})`
 		: "";
 	const hasBody = tool.meta.bodyMode !== "none" && tool.meta.method !== "GET";
+	const isForm = tool.meta.bodyContentType === "form";
+	const pickCall = `pickBody(p, ${JSON.stringify(tool.meta.bodyParams)})`;
 	const bodyLine = hasBody
-		? `\n\t\t\tbody: JSON.stringify(pickBody(p, ${JSON.stringify(tool.meta.bodyParams)})),`
+		? `\n\t\t\tbody: ${isForm ? `formEncode(${pickCall}).toString()` : `JSON.stringify(${pickCall})`},`
 		: "";
+	const contentType = hasBody && isForm ? "application/x-www-form-urlencoded" : "application/json";
 
 	return `server.tool(
 	${JSON.stringify(tool.name)},
@@ -377,7 +380,7 @@ function renderSimpleToolHandler(tool: McpToolDefinition, authMode: AuthMode): s
 	async (params) => {
 		const p: Record<string, unknown> = params;
 		const url = \`\${API_BASE_URL}${pathInterpolation}\`${query};
-		const headers: Record<string, string> = { ...${authCall}, "Content-Type": "application/json" };
+		const headers: Record<string, string> = { ...${authCall}, "Content-Type": ${JSON.stringify(contentType)} };
 		const res = await fetch(url, {
 			method: ${JSON.stringify(tool.meta.method)},
 			headers,${bodyLine}
@@ -565,6 +568,26 @@ function renderRequestHelpers(opts: GenerateOptions): string {
 	const out: Record<string, unknown> = {};
 	for (const [propKey, fieldKey] of pairs) {
 		if (params[propKey] !== undefined) out[fieldKey] = params[propKey];
+	}
+	return out;
+}`);
+	}
+	const needsForm = opts.tools.some(
+		(t) => t.meta.bodyMode !== "none" && t.meta.bodyContentType === "form" && t.meta.method !== "GET",
+	);
+	if (needsForm) {
+		parts.push(`function formEncode(value: unknown, prefix = "", out = new URLSearchParams()): URLSearchParams {
+	if (value === null || value === undefined) return out;
+	if (typeof value === "object") {
+		if (Array.isArray(value)) {
+			value.forEach((v, i) => formEncode(v, prefix ? \`\${prefix}[\${i}]\` : String(i), out));
+		} else {
+			for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+				formEncode(v, prefix ? \`\${prefix}[\${k}]\` : k, out);
+			}
+		}
+	} else if (prefix) {
+		out.append(prefix, String(value));
 	}
 	return out;
 }`);

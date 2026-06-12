@@ -91,6 +91,30 @@ paths:
       responses:
         "200":
           description: Results
+  /charges:
+    post:
+      operationId: createCharge
+      summary: Form-encoded body (Stripe-style)
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [amount]
+              properties:
+                amount:
+                  type: integer
+                currency:
+                  type: string
+                metadata:
+                  type: object
+                  properties:
+                    order_id:
+                      type: string
+      responses:
+        "200":
+          description: OK
   /raw:
     post:
       operationId: submitRaw
