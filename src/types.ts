@@ -73,13 +73,14 @@ export interface Response {
 }
 
 export interface JsonSchema {
-	type?: string;
+	type?: string | string[];
 	properties?: Record<string, JsonSchema>;
 	items?: JsonSchema;
 	required?: string[];
 	description?: string;
 	enum?: unknown[];
 	format?: string;
+	nullable?: boolean;
 	$ref?: string;
 	allOf?: JsonSchema[];
 	oneOf?: JsonSchema[];
@@ -112,6 +113,12 @@ export interface McpToolDefinition {
 		auth: SecurityScheme | null;
 		pagination: PaginationConfig | null;
 		streaming: boolean;
+		/** Input schema property names that map to URL query parameters. */
+		queryParams: string[];
+		/** Pairs of [inputPropertyName, requestBodyFieldName]. */
+		bodyParams: Array<[string, string]>;
+		/** "fields": body assembled from bodyParams; "whole": params.body sent as-is. */
+		bodyMode: "none" | "fields" | "whole";
 	};
 }
 

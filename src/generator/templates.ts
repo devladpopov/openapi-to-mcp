@@ -1,4 +1,4 @@
-import type { GenerateOptions, McpToolDefinition, AuthMode } from "../types.js";
+import type { GenerateOptions, JsonSchema, McpToolDefinition, AuthMode } from "../types.js";
 
 export function renderServerCode(opts: GenerateOptions): string {
 	const imports = buildImports(opts);
@@ -17,6 +17,8 @@ const API_BASE_URL = process.env.API_BASE_URL ?? ${JSON.stringify(opts.spec.serv
 ${renderAuthHelper(opts)}
 
 ${renderPaginationHelper(opts)}
+
+${renderRequestHelpers(opts)}
 
 ${toolRegistrations}
 
@@ -359,24 +361,26 @@ function renderToolHandler(tool: McpToolDefinition, authMode: AuthMode): string 
 function renderSimpleToolHandler(tool: McpToolDefinition, authMode: AuthMode): string {
 	const zodSchema = jsonSchemaToZod(tool.inputSchema);
 	const authCall = isAsyncAuth(authMode) ? "await authHeaders()" : "authHeaders()";
-
-	const pathInterpolation = tool.meta.path.replace(
-		/\{(\w+)\}/g,
-		"${params.$1}",
-	);
-
-	const hasBody = ["POST", "PUT", "PATCH"].includes(tool.meta.method);
+	const pathInterpolation = interpolatePath(tool.meta.path);
+	const query = tool.meta.queryParams.length
+		? ` + buildQuery(p, ${JSON.stringify(tool.meta.queryParams)})`
+		: "";
+	const hasBody = tool.meta.bodyMode !== "none" && tool.meta.method !== "GET";
+	const bodyLine = hasBody
+		? `\n\t\t\tbody: JSON.stringify(pickBody(p, ${JSON.stringify(tool.meta.bodyParams)})),`
+		: "";
 
 	return `server.tool(
 	${JSON.stringify(tool.name)},
 	${JSON.stringify(tool.description)},
 	${zodSchema},
 	async (params) => {
-		const url = \`\${API_BASE_URL}${pathInterpolation}\`${renderQueryString(tool)};
+		const p: Record<string, unknown> = params;
+		const url = \`\${API_BASE_URL}${pathInterpolation}\`${query};
 		const headers: Record<string, string> = { ...${authCall}, "Content-Type": "application/json" };
 		const res = await fetch(url, {
 			method: ${JSON.stringify(tool.meta.method)},
-			headers,${hasBody ? `\n\t\t\tbody: JSON.stringify(Object.fromEntries(Object.entries(params).filter(([k]) => !${JSON.stringify(tool.meta.path)}.includes(\`{\${k}}\`)))),` : ""}
+			headers,${bodyLine}
 		});
 		const data = await res.text();
 		return {
@@ -390,27 +394,23 @@ function renderPaginatedToolHandler(tool: McpToolDefinition, authMode: AuthMode)
 	const zodSchema = jsonSchemaToZod(tool.inputSchema);
 	const authCall = isAsyncAuth(authMode) ? "await authHeaders()" : "authHeaders()";
 	const pg = tool.meta.pagination!;
-
-	const pathInterpolation = tool.meta.path.replace(
-		/\{(\w+)\}/g,
-		"${params.$1}",
-	);
+	const pathInterpolation = interpolatePath(tool.meta.path);
+	const passThrough = JSON.stringify(tool.meta.queryParams);
 
 	// Build the pagination param injection based on type
 	let paginationLogic: string;
 	if (pg.type === "offset") {
 		paginationLogic = `\t\t// Decode cursor to get offset, or start from 0
-		const pageLimit = params.limit ?? ${pg.defaultLimit};
+		const pageLimit = typeof p.limit === "number" ? p.limit : ${pg.defaultLimit};
 		let offset = 0;
-		if (params.cursor) {
-			const decoded = decodeCursor(params.cursor);
+		if (typeof p.cursor === "string") {
+			const decoded = decodeCursor(p.cursor);
 			offset = (decoded.offset as number) ?? 0;
 		}
 		const queryParams: Record<string, string> = {};
-		for (const [k, v] of Object.entries(params)) {
-			if (k === "cursor" || k === "limit" || v === undefined) continue;
-			if (${JSON.stringify(tool.meta.path)}.includes(\`{\${k}}\`)) continue;
-			queryParams[k] = String(v);
+		for (const k of ${passThrough}) {
+			const v = p[k];
+			if (v !== undefined && v !== null) queryParams[k] = String(v);
 		}
 		queryParams[${JSON.stringify(pg.limitParam)}] = String(pageLimit);
 		queryParams[${JSON.stringify(pg.offsetParam!)}] = String(offset);
@@ -418,17 +418,16 @@ function renderPaginatedToolHandler(tool: McpToolDefinition, authMode: AuthMode)
 		const url = \`\${API_BASE_URL}${pathInterpolation}\` + (qs ? "?" + qs : "");`;
 	} else if (pg.type === "page") {
 		paginationLogic = `\t\t// Decode cursor to get page number, or start from 1
-		const pageLimit = params.limit ?? ${pg.defaultLimit};
+		const pageLimit = typeof p.limit === "number" ? p.limit : ${pg.defaultLimit};
 		let page = 1;
-		if (params.cursor) {
-			const decoded = decodeCursor(params.cursor);
+		if (typeof p.cursor === "string") {
+			const decoded = decodeCursor(p.cursor);
 			page = (decoded.page as number) ?? 1;
 		}
 		const queryParams: Record<string, string> = {};
-		for (const [k, v] of Object.entries(params)) {
-			if (k === "cursor" || k === "limit" || v === undefined) continue;
-			if (${JSON.stringify(tool.meta.path)}.includes(\`{\${k}}\`)) continue;
-			queryParams[k] = String(v);
+		for (const k of ${passThrough}) {
+			const v = p[k];
+			if (v !== undefined && v !== null) queryParams[k] = String(v);
 		}
 		queryParams[${JSON.stringify(pg.limitParam)}] = String(pageLimit);
 		queryParams[${JSON.stringify(pg.pageParam!)}] = String(page);
@@ -436,16 +435,15 @@ function renderPaginatedToolHandler(tool: McpToolDefinition, authMode: AuthMode)
 		const url = \`\${API_BASE_URL}${pathInterpolation}\` + (qs ? "?" + qs : "");`;
 	} else {
 		// cursor type: pass cursor directly
-		paginationLogic = `\t\tconst pageLimit = params.limit ?? ${pg.defaultLimit};
+		paginationLogic = `\t\tconst pageLimit = typeof p.limit === "number" ? p.limit : ${pg.defaultLimit};
 		const queryParams: Record<string, string> = {};
-		for (const [k, v] of Object.entries(params)) {
-			if (k === "cursor" || k === "limit" || v === undefined) continue;
-			if (${JSON.stringify(tool.meta.path)}.includes(\`{\${k}}\`)) continue;
-			queryParams[k] = String(v);
+		for (const k of ${passThrough}) {
+			const v = p[k];
+			if (v !== undefined && v !== null) queryParams[k] = String(v);
 		}
 		queryParams[${JSON.stringify(pg.limitParam)}] = String(pageLimit);
-		if (params.cursor) {
-			const decoded = decodeCursor(params.cursor);
+		if (typeof p.cursor === "string") {
+			const decoded = decodeCursor(p.cursor);
 			queryParams[${JSON.stringify(pg.cursorParam ?? "cursor")}] = decoded.cursor as string;
 		}
 		const qs = new URLSearchParams(queryParams).toString();
@@ -475,6 +473,7 @@ function renderPaginatedToolHandler(tool: McpToolDefinition, authMode: AuthMode)
 	${JSON.stringify(tool.description)},
 	${zodSchema},
 	async (params) => {
+		const p: Record<string, unknown> = params;
 ${paginationLogic}
 		const headers: Record<string, string> = { ...${authCall}, "Content-Type": "application/json" };
 		const res = await fetch(url, { method: "GET", headers });
@@ -499,18 +498,18 @@ ${nextCursorLogic}
 function renderStreamingToolHandler(tool: McpToolDefinition, authMode: AuthMode): string {
 	const zodSchema = jsonSchemaToZod(tool.inputSchema);
 	const authCall = isAsyncAuth(authMode) ? "await authHeaders()" : "authHeaders()";
-
-	const pathInterpolation = tool.meta.path.replace(
-		/\{(\w+)\}/g,
-		"${params.$1}",
-	);
+	const pathInterpolation = interpolatePath(tool.meta.path);
+	const query = tool.meta.queryParams.length
+		? ` + buildQuery(p, ${JSON.stringify(tool.meta.queryParams)})`
+		: "";
 
 	return `server.tool(
 	${JSON.stringify(tool.name)},
 	${JSON.stringify(tool.description + " (streaming)")},
 	${zodSchema},
 	async (params) => {
-		const url = \`\${API_BASE_URL}${pathInterpolation}\`${renderQueryString(tool)};
+		const p: Record<string, unknown> = params;
+		const url = \`\${API_BASE_URL}${pathInterpolation}\`${query};
 		const headers: Record<string, string> = { ...${authCall}, "Accept": "text/event-stream" };
 		const res = await fetch(url, { method: ${JSON.stringify(tool.meta.method)}, headers });
 		if (!res.body) {
@@ -535,57 +534,150 @@ function isAsyncAuth(authMode: AuthMode): boolean {
 	return authMode === "oauth2" || authMode === "oauth2-auth-code";
 }
 
-function renderQueryString(tool: McpToolDefinition): string {
-	const queryParams = Object.entries(tool.inputSchema.properties ?? {}).filter(([name]) => {
-		return !tool.meta.path.includes(`{${name}}`);
-	});
-
-	if (queryParams.length === 0 || ["POST", "PUT", "PATCH"].includes(tool.meta.method)) {
-		return "";
-	}
-
-	return ` + "?" + new URLSearchParams(
-			Object.entries(params)
-				.filter(([k]) => !${JSON.stringify(tool.meta.path)}.includes(\`{\${k}}\`))
-				.filter(([, v]) => v !== undefined)
-				.map(([k, v]) => [k, String(v)])
-		).toString()`;
+/** Interpolate OpenAPI path template into a JS template literal using params. */
+function interpolatePath(path: string): string {
+	return path.replace(
+		/\{([^}]+)\}/g,
+		(_m, name: string) => `\${encodeURIComponent(String(p[${JSON.stringify(name)}] ?? ""))}`,
+	);
 }
+
+/** Runtime helpers shared by all generated handlers; rendered once per server. */
+function renderRequestHelpers(opts: GenerateOptions): string {
+	const needsBody = opts.tools.some((t) => t.meta.bodyMode !== "none");
+	const needsQuery = opts.tools.some((t) => t.meta.queryParams.length > 0 && !t.meta.pagination);
+
+	const parts: string[] = [];
+	if (needsQuery) {
+		parts.push(`function buildQuery(params: Record<string, unknown>, keys: string[]): string {
+	const entries: Array<[string, string]> = [];
+	for (const k of keys) {
+		const v = params[k];
+		if (v === undefined || v === null) continue;
+		entries.push([k, String(v)]);
+	}
+	return entries.length ? "?" + new URLSearchParams(entries).toString() : "";
+}`);
+	}
+	if (needsBody) {
+		parts.push(`function pickBody(params: Record<string, unknown>, pairs: string[][]): unknown {
+	if (pairs.length === 1 && pairs[0][1] === "*") return params[pairs[0][0]];
+	const out: Record<string, unknown> = {};
+	for (const [propKey, fieldKey] of pairs) {
+		if (params[propKey] !== undefined) out[fieldKey] = params[propKey];
+	}
+	return out;
+}`);
+	}
+	return parts.join("\n\n");
+}
+
+const MAX_ZOD_DEPTH = 4;
+const MAX_DESCRIBE_LENGTH = 300;
 
 function jsonSchemaToZod(schema: McpToolDefinition["inputSchema"]): string {
 	const entries = Object.entries(schema.properties ?? {});
 	if (entries.length === 0) return "{}";
 
 	const fields = entries.map(([name, prop]) => {
-		let zodType = schemaToZodType(prop);
+		let zodType = schemaToZodType(prop, 0);
 		if (!schema.required?.includes(name)) {
 			zodType += ".optional()";
 		}
 		if (prop.description) {
-			zodType += `.describe(${JSON.stringify(prop.description)})`;
+			zodType += `.describe(${JSON.stringify(truncate(prop.description, MAX_DESCRIBE_LENGTH))})`;
 		}
-		return `\t\t${name}: ${zodType},`;
+		return `\t\t${JSON.stringify(name)}: ${zodType},`;
 	});
 
 	return `{\n${fields.join("\n")}\n\t}`;
 }
 
-function schemaToZodType(schema: { type?: string; enum?: unknown[]; items?: { type?: string } }): string {
-	if (schema.enum) {
-		const values = schema.enum.map((v) => JSON.stringify(v));
-		return `z.enum([${values.join(", ")}])`;
+function truncate(s: string, max: number): string {
+	return s.length > max ? `${s.slice(0, max - 3)}...` : s;
+}
+
+function schemaToZodType(schema: JsonSchema, depth: number): string {
+	if (depth > MAX_ZOD_DEPTH) return "z.unknown()";
+	let zod = baseZodType(schema, depth);
+	const isNullable =
+		schema.nullable === true || (Array.isArray(schema.type) && schema.type.includes("null"));
+	if (isNullable && zod !== "z.unknown()" && zod !== "z.null()") {
+		zod += ".nullable()";
 	}
-	switch (schema.type) {
+	return zod;
+}
+
+function baseZodType(schema: JsonSchema, depth: number): string {
+	if (schema.enum && schema.enum.length > 0) {
+		const nonNull = schema.enum.filter((v) => v !== null);
+		if (nonNull.length === 0) return "z.null()";
+		if (nonNull.every((v) => typeof v === "string")) {
+			return `z.enum([${nonNull.map((v) => JSON.stringify(v)).join(", ")}])`;
+		}
+		const literals = nonNull.map((v) => `z.literal(${JSON.stringify(v)})`);
+		return literals.length === 1 ? literals[0] : `z.union([${literals.join(", ")}])`;
+	}
+
+	const variants = schema.oneOf ?? schema.anyOf;
+	if (variants && variants.length > 0) {
+		const subs = [
+			...new Set(
+				variants
+					.filter((v) => v.type !== "null")
+					.slice(0, 5)
+					.map((v) => schemaToZodType(v, depth + 1)),
+			),
+		];
+		if (subs.length === 0) return "z.unknown()";
+		if (subs.length === 1) return subs[0];
+		return `z.union([${subs.join(", ")}])`;
+	}
+
+	if (schema.allOf && schema.allOf.length > 0) {
+		const merged: JsonSchema = { type: "object", properties: {}, required: [] };
+		for (const part of schema.allOf) {
+			if (part.properties) Object.assign(merged.properties!, part.properties);
+			if (part.required) merged.required!.push(...part.required);
+		}
+		if (Object.keys(merged.properties!).length > 0) {
+			return renderZodObject(merged, depth);
+		}
+		return "z.unknown()";
+	}
+
+	const type = Array.isArray(schema.type)
+		? schema.type.find((t) => t !== "null")
+		: schema.type;
+
+	switch (type) {
 		case "integer":
+			return "z.number().int()";
 		case "number":
 			return "z.number()";
 		case "boolean":
 			return "z.boolean()";
 		case "array":
-			return `z.array(${schemaToZodType(schema.items ?? { type: "string" })})`;
+			return `z.array(${schema.items ? schemaToZodType(schema.items, depth + 1) : "z.unknown()"})`;
 		case "object":
-			return "z.record(z.unknown())";
+			return renderZodObject(schema, depth);
+		case "string":
+			return "z.string()";
 		default:
+			if (schema.properties) return renderZodObject(schema, depth);
 			return "z.string()";
 	}
+}
+
+function renderZodObject(schema: JsonSchema, depth: number): string {
+	const entries = Object.entries(schema.properties ?? {});
+	if (entries.length === 0 || depth >= MAX_ZOD_DEPTH) {
+		return "z.record(z.unknown())";
+	}
+	const fields = entries.map(([key, val]) => {
+		let zod = schemaToZodType(val, depth + 1);
+		if (!schema.required?.includes(key)) zod += ".optional()";
+		return `${JSON.stringify(key)}: ${zod}`;
+	});
+	return `z.object({ ${fields.join(", ")} }).passthrough()`;
 }

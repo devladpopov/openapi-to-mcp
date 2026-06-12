@@ -23,7 +23,7 @@ describe("mapToMcpTools", () => {
 		const tools = mapToMcpTools(spec);
 		const listPets = tools.find((t) => t.name === "listPets")!;
 
-		expect(listPets.description).toBe("List all pets");
+		expect(listPets.description).toStartWith("List all pets");
 		expect(listPets.inputSchema.type).toBe("object");
 		expect(listPets.inputSchema.properties!.limit.type).toBe("integer");
 		expect(listPets.inputSchema.required).toBeUndefined(); // limit is optional

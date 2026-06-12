@@ -14,6 +14,7 @@ const HTTP_METHODS = ["get", "post", "put", "patch", "delete"] as const;
 export function mapToMcpTools(spec: OpenApiSpec, options: MapperOptions = {}): McpToolDefinition[] {
 	const tools: McpToolDefinition[] = [];
 	const detectPagination = options.detectPagination ?? true;
+	const usedNames = new Set<string>();
 
 	for (const [path, pathItem] of Object.entries(spec.paths)) {
 		for (const method of HTTP_METHODS) {
@@ -31,12 +32,23 @@ export function mapToMcpTools(spec: OpenApiSpec, options: MapperOptions = {}): M
 			const tool = mapOperation(spec, path, method, operation, pathItem.parameters, detectPagination);
 			if (tool) {
 				if (options.excludeOperations?.includes(tool.name)) continue;
+				tool.name = uniqueName(tool.name, usedNames);
+				usedNames.add(tool.name);
 				tools.push(tool);
 			}
 		}
 	}
 
 	return tools;
+}
+
+/** MCP tool names must match ^[a-zA-Z0-9_-]{1,64}$ and be unique per server. */
+function uniqueName(name: string, used: Set<string>): string {
+	let base = name.slice(0, 60);
+	if (!used.has(base)) return base;
+	let i = 2;
+	while (used.has(`${base}_${i}`)) i++;
+	return `${base}_${i}`;
 }
 
 function mapOperation(
@@ -52,10 +64,11 @@ function mapOperation(
 		op["x-mcp-description"] ?? op.summary ?? op.description ?? `${method.toUpperCase()} ${path}`;
 
 	const allParams = mergeParams(pathParams, op.parameters);
-	const inputSchema = buildInputSchema(op, allParams);
+	const { schema: inputSchema, queryParams, bodyParams, bodyMode } = buildInputSchema(op, allParams);
 	const auth = resolveAuth(spec, op);
 	const pagination = detectPagination ? detectPaginationConfig(op, allParams) : null;
 	const streaming = isStreamingResponse(op);
+	const responseHint = buildResponseHint(op);
 
 	// If pagination is detected, add cursor and limit to the input schema
 	if (pagination) {
@@ -83,9 +96,19 @@ function mapOperation(
 		}
 	}
 
+	// queryParams must reflect the final schema (pagination may remove params)
+	const finalQueryParams = queryParams.filter(
+		(q) =>
+			!pagination ||
+			(q !== pagination.offsetParam && q !== pagination.pageParam && q !== pagination.limitParam && q !== pagination.cursorParam),
+	);
+
+	let fullDescription = pagination ? `${description} (paginated)` : description;
+	if (responseHint) fullDescription += responseHint;
+
 	return {
 		name: sanitizeName(name),
-		description: pagination ? `${description} (paginated)` : description,
+		description: fullDescription,
 		inputSchema,
 		meta: {
 			method: method.toUpperCase(),
@@ -94,8 +117,32 @@ function mapOperation(
 			auth,
 			pagination,
 			streaming,
+			queryParams: finalQueryParams,
+			bodyParams,
+			bodyMode,
 		},
 	};
+}
+
+/** Compact summary of the success response shape so the LLM knows what to expect. */
+function buildResponseHint(op: Operation): string | null {
+	const resp = op.responses?.["200"] ?? op.responses?.["201"];
+	const schema = resp?.content?.["application/json"]?.schema;
+	if (!schema) return null;
+
+	let fields: string[] = [];
+	let prefix = "Returns";
+	if (schema.type === "array") {
+		prefix = "Returns array of";
+		if (schema.items?.properties) fields = Object.keys(schema.items.properties);
+	} else if (schema.properties) {
+		fields = Object.keys(schema.properties);
+	}
+	if (fields.length === 0) return null;
+
+	const shown = fields.slice(0, 12);
+	const suffix = fields.length > shown.length ? ", ..." : "";
+	return ` ${prefix}: { ${shown.join(", ")}${suffix} }`;
 }
 
 function mergeParams(pathParams?: Parameter[], opParams?: Parameter[]): Parameter[] {
@@ -113,16 +160,27 @@ function mergeParams(pathParams?: Parameter[], opParams?: Parameter[]): Paramete
 	return result;
 }
 
-function buildInputSchema(op: Operation, params: Parameter[]): JsonSchema {
+interface BuiltInput {
+	schema: JsonSchema;
+	queryParams: string[];
+	bodyParams: Array<[string, string]>;
+	bodyMode: "none" | "fields" | "whole";
+}
+
+function buildInputSchema(op: Operation, params: Parameter[]): BuiltInput {
 	const properties: Record<string, JsonSchema> = {};
 	const required: string[] = [];
+	const queryParams: string[] = [];
+	const bodyParams: Array<[string, string]> = [];
+	let bodyMode: "none" | "fields" | "whole" = "none";
 
 	for (const param of params) {
-		if (param.in === "header") continue;
+		if (param.in === "header" || param.in === "cookie") continue;
 		properties[param.name] = {
 			...param.schema,
 			description: param.description ?? param.schema?.description,
 		};
+		if (param.in === "query") queryParams.push(param.name);
 		if (param.required) {
 			required.push(param.name);
 		}
@@ -131,27 +189,41 @@ function buildInputSchema(op: Operation, params: Parameter[]): JsonSchema {
 	const bodySchema = op.requestBody?.content?.["application/json"]?.schema;
 	if (bodySchema) {
 		if (bodySchema.type === "object" && bodySchema.properties) {
+			bodyMode = "fields";
 			for (const [key, val] of Object.entries(bodySchema.properties)) {
-				properties[key] = val;
-			}
-			if (bodySchema.required) {
-				required.push(...bodySchema.required);
+				// Avoid collision with path/query params of the same name
+				let propKey = key;
+				if (propKey in properties) propKey = `body_${key}`;
+				properties[propKey] = val;
+				bodyParams.push([propKey, key]);
+				if (bodySchema.required?.includes(key)) {
+					required.push(propKey);
+				}
 			}
 		} else {
-			properties.body = {
+			bodyMode = "whole";
+			let bodyKey = "body";
+			if (bodyKey in properties) bodyKey = "request_body";
+			properties[bodyKey] = {
 				...bodySchema,
 				description: op.requestBody?.description ?? bodySchema.description,
 			};
+			bodyParams.push([bodyKey, "*"]);
 			if (op.requestBody?.required) {
-				required.push("body");
+				required.push(bodyKey);
 			}
 		}
 	}
 
 	return {
-		type: "object",
-		properties,
-		required: required.length > 0 ? required : undefined,
+		schema: {
+			type: "object",
+			properties,
+			required: required.length > 0 ? required : undefined,
+		},
+		queryParams,
+		bodyParams,
+		bodyMode,
 	};
 }
 

@@ -1,0 +1,117 @@
+openapi: 3.0.3
+info:
+  title: Complex API
+  version: 1.0.0
+servers:
+  - url: https://api.complex.example.com
+paths:
+  /items/{id}:
+    put:
+      operationId: updateItem
+      summary: Update an item
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: dry_run
+          in: query
+          schema:
+            type: boolean
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                id:
+                  type: string
+                  description: Conflicts with path param id
+                priority:
+                  type: integer
+                  enum: [1, 2, 3]
+                status:
+                  type: string
+                  enum: [active, archived]
+                metadata:
+                  type: object
+                  properties:
+                    color:
+                      type: string
+                      nullable: true
+                    sizes:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          label:
+                            type: string
+                          value:
+                            type: number
+                variant:
+                  oneOf:
+                    - type: string
+                    - type: integer
+      responses:
+        "200":
+          description: Updated item
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  name:
+                    type: string
+                  updated_at:
+                    type: string
+  /search:
+    post:
+      operationId: search
+      summary: Search with query params on POST
+      parameters:
+        - name: locale
+          in: query
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                query:
+                  type: string
+      responses:
+        "200":
+          description: Results
+  /raw:
+    post:
+      operationId: submitRaw
+      summary: Whole-body payload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: string
+      responses:
+        "200":
+          description: OK
+components:
+  schemas:
+    Node:
+      type: object
+      properties:
+        name:
+          type: string
+        parent:
+          $ref: "#/components/schemas/Node"
