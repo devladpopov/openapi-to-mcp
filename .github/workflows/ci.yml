@@ -34,9 +34,9 @@ jobs:
         run: bun run build
 
       - name: Smoke test CLI
-        run: node dist/cli.js generate tests/fixtures/petstore.yaml -o /tmp/smoke --name Smoke
+        run: node dist/cli.js generate -i tests/fixtures/petstore.yaml -o /tmp/smoke --name Smoke
         if: runner.os != 'Windows'
 
       - name: Smoke test CLI (Windows)
-        run: node dist/cli.js generate tests/fixtures/petstore.yaml -o "$env:TEMP\smoke" --name Smoke
+        run: node dist/cli.js generate -i tests/fixtures/petstore.yaml -o "$env:TEMP\smoke" --name Smoke
         if: runner.os == 'Windows'
