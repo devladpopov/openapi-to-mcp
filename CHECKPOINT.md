@@ -1,8 +1,8 @@
 STATUS: COMPLETED
 TASK: Full improvement plan: schema quality, e2e, CI, real-spec hardening
 DATE: 2026-06-12
-LAST_ACTION: All engineering done and pushed (HEAD c50dae9). 74 tests pass. CI green on ubuntu + windows. Real specs verified: Stripe (587 tools) and GitHub (1190 tools) generate and pass tsc.
-NEXT: npm publish BLOCKED on package name: "openapi-to-mcp" is TAKEN on npm (Rustho, v0.1.5). Free alternatives: oas-to-mcp, spec-to-mcp, scoped @devladpopov/openapi-to-mcp. Awaiting Vlad's choice. Repo is already PUBLIC.
+LAST_ACTION: PUBLISHED to npm as openapi-mcp-codegen@0.2.0 (HEAD c9bafdc, tag v0.2.0). 74 tests pass, CI green ubuntu+windows. npm name "openapi-to-mcp" was taken (Rustho), so package + CLI bin renamed to openapi-mcp-codegen. Repo public.
+NEXT: await user input. Optional remaining: promo posts from drafts/ (REQUIRE separate explicit confirmation per safety rules), v0.3 features (multi-client schema adaptation, webhooks via Tasks from RESEARCH.md).
 DO_NOT_REDO:
 - Market research (RESEARCH.md), MVP, v0.2 (OAuth2 flows, pagination, streaming, dual build)
 - Runtime bug fixes: async (params), handleRequest(req,res), body/path param separation
@@ -12,6 +12,8 @@ DO_NOT_REDO:
 - In-repo e2e test: generate + bun install + tsc in tmp dir (commit 70cad74)
 - GitHub Actions CI ubuntu+windows, smoke test fixed -i flag (commit c50dae9), run green
 - git push done, repo already public
+- npm publish done: openapi-mcp-codegen@0.2.0 live, verified in registry (commit c9bafdc, tag v0.2.0)
+- DO NOT republish 0.2.0 (immutable on npm); next release must bump version
 VERIFY_BEFORE_ACT:
 - git log --oneline -3
 - bun test
