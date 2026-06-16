@@ -1,9 +1,9 @@
-# openapi-to-mcp
+# openapi-mcp-codegen
 
 Generate [MCP](https://modelcontextprotocol.io) servers from OpenAPI 3.x specifications. One command, working server.
 
 ```bash
-npx openapi-to-mcp generate -i petstore.yaml -o ./mcp-server
+npx openapi-mcp-codegen generate -i petstore.yaml -o ./mcp-server
 cd mcp-server && npm install && npm start
 ```
 
@@ -25,16 +25,16 @@ Takes an OpenAPI 3.x spec (YAML or JSON) and produces a TypeScript MCP server wh
 
 ```bash
 # From a local file
-npx openapi-to-mcp generate -i api-spec.yaml -o ./my-server
+npx openapi-mcp-codegen generate -i api-spec.yaml -o ./my-server
 
 # From a URL
-npx openapi-to-mcp generate -i https://petstore3.swagger.io/api/v3/openapi.json -o ./petstore
+npx openapi-mcp-codegen generate -i https://petstore3.swagger.io/api/v3/openapi.json -o ./petstore
 
 # Preview tools without generating (dry run)
-npx openapi-to-mcp generate -i spec.yaml --dry-run
+npx openapi-mcp-codegen generate -i spec.yaml --dry-run
 
 # Generate with Streamable HTTP transport
-npx openapi-to-mcp generate -i spec.yaml -o ./server --transport streamable-http
+npx openapi-mcp-codegen generate -i spec.yaml -o ./server --transport streamable-http
 ```
 
 ### Use with Claude Desktop
@@ -78,7 +78,7 @@ Add to `.cursor/mcp.json` in your project:
 ## CLI options
 
 ```
-openapi-to-mcp generate [options]
+openapi-mcp-codegen generate [options]
 
 Options:
   -i, --input <path>         Path or URL to OpenAPI spec (required)
@@ -215,7 +215,7 @@ API_BASE_URL=https://api.example.com API_KEY=xxx npm start
 ## Programmatic API
 
 ```typescript
-import { parseSpec, mapToMcpTools, generate } from "openapi-to-mcp";
+import { parseSpec, mapToMcpTools, generate } from "openapi-mcp-codegen";
 
 const spec = await parseSpec("./api-spec.yaml");
 const tools = mapToMcpTools(spec, {

@@ -1,10 +1,10 @@
 {
-  "name": "openapi-to-mcp",
+  "name": "openapi-mcp-codegen",
   "version": "0.2.0",
   "description": "Generate MCP servers from OpenAPI 3.x specifications. One command, working server.",
   "type": "module",
   "bin": {
-    "openapi-to-mcp": "./dist/cli.js"
+    "openapi-mcp-codegen": "./dist/cli.js"
   },
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",

@@ -12,7 +12,7 @@ const VERSION = "0.2.0";
 const program = new Command();
 
 program
-	.name("openapi-to-mcp")
+	.name("openapi-mcp-codegen")
 	.description("Generate MCP servers from OpenAPI 3.x specifications")
 	.version(VERSION);
 
