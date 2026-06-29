@@ -17,6 +17,7 @@ describe("pagination detection", () => {
 		expect(listItems.meta.pagination!.limitParam).toBe("limit");
 		expect(listItems.meta.pagination!.offsetParam).toBe("offset");
 		expect(listItems.meta.pagination!.itemsPath).toBe("items");
+		expect(listItems.meta.pagination!.totalPath).toBe("total");
 	});
 
 	test("detects page-based pagination (per_page + page)", async () => {
