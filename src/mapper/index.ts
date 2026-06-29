@@ -335,7 +335,12 @@ function inferPaginationResponsePaths(op: Operation): PaginationResponsePaths {
 	const properties = schema?.properties;
 	if (!properties) return defaults;
 
-	const arrayEntry = Object.entries(properties).find(([, propertySchema]) => propertySchema.type === "array");
+	const arrayEntries = Object.entries(properties).filter(([, propertySchema]) => propertySchema.type === "array");
+	const namedArrayEntry = arrayEntries.find(([name]) => {
+		const normalized = name.toLowerCase();
+		return ["items", "data", "results", "records", "tweets"].includes(normalized);
+	});
+	const arrayEntry = namedArrayEntry ?? (arrayEntries.length === 1 ? arrayEntries[0] : undefined);
 	const cursorEntry = Object.entries(properties).find(([name, propertySchema]) => {
 		if (propertySchema.type !== "string") return false;
 		const normalized = name.toLowerCase();

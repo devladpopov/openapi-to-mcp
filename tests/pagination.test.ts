@@ -16,6 +16,7 @@ describe("pagination detection", () => {
 		expect(listItems.meta.pagination!.type).toBe("offset");
 		expect(listItems.meta.pagination!.limitParam).toBe("limit");
 		expect(listItems.meta.pagination!.offsetParam).toBe("offset");
+		expect(listItems.meta.pagination!.itemsPath).toBe("items");
 	});
 
 	test("detects page-based pagination (per_page + page)", async () => {
@@ -27,6 +28,8 @@ describe("pagination detection", () => {
 		expect(listUsers.meta.pagination!.type).toBe("page");
 		expect(listUsers.meta.pagination!.limitParam).toBe("per_page");
 		expect(listUsers.meta.pagination!.pageParam).toBe("page");
+		expect(listUsers.meta.pagination!.itemsPath).toBe("data");
+		expect(listUsers.meta.pagination!.totalPath).toBe("total_count");
 	});
 
 	test("detects cursor-based pagination (limit + after)", async () => {
