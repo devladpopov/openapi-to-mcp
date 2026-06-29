@@ -169,6 +169,12 @@ interface BuiltInput {
 	bodyContentType: "json" | "form";
 }
 
+interface PaginationResponsePaths {
+	cursorPath: string;
+	totalPath: string;
+	itemsPath: string;
+}
+
 function buildInputSchema(op: Operation, params: Parameter[]): BuiltInput {
 	const properties: Record<string, JsonSchema> = {};
 	const required: string[] = [];
@@ -251,6 +257,8 @@ function detectPaginationConfig(op: Operation, params: Parameter[]): PaginationC
 		};
 	}
 
+	const responsePaths = inferPaginationResponsePaths(op);
+
 	// Auto-detect from parameter names (only for GET operations)
 	const paramNames = params.map((p) => p.name.toLowerCase());
 
@@ -272,9 +280,9 @@ function detectPaginationConfig(op: Operation, params: Parameter[]): PaginationC
 			type: "cursor",
 			limitParam: limitParam.name,
 			cursorParam: cursorParam.name,
-			cursorPath: "next_cursor",
-			totalPath: "total",
-			itemsPath: "items",
+			cursorPath: responsePaths.cursorPath,
+			totalPath: responsePaths.totalPath,
+			itemsPath: responsePaths.itemsPath,
 			defaultLimit: 20,
 		};
 	}
@@ -289,9 +297,9 @@ function detectPaginationConfig(op: Operation, params: Parameter[]): PaginationC
 			type: "offset",
 			limitParam: limitParam.name,
 			offsetParam: offsetParam.name,
-			cursorPath: "next_cursor",
-			totalPath: "total",
-			itemsPath: "items",
+			cursorPath: responsePaths.cursorPath,
+			totalPath: responsePaths.totalPath,
+			itemsPath: responsePaths.itemsPath,
 			defaultLimit: 20,
 		};
 	}
@@ -306,14 +314,54 @@ function detectPaginationConfig(op: Operation, params: Parameter[]): PaginationC
 			type: "page",
 			limitParam: limitParam.name,
 			pageParam: pageParam.name,
-			cursorPath: "next_cursor",
-			totalPath: "total",
-			itemsPath: "items",
+			cursorPath: responsePaths.cursorPath,
+			totalPath: responsePaths.totalPath,
+			itemsPath: responsePaths.itemsPath,
 			defaultLimit: 20,
 		};
 	}
 
 	return null;
+}
+
+function inferPaginationResponsePaths(op: Operation): PaginationResponsePaths {
+	const defaults: PaginationResponsePaths = {
+		cursorPath: "next_cursor",
+		totalPath: "total",
+		itemsPath: "items",
+	};
+	const response = op.responses?.["200"] ?? op.responses?.["201"];
+	const schema = response?.content?.["application/json"]?.schema;
+	const properties = schema?.properties;
+	if (!properties) return defaults;
+
+	const arrayEntry = Object.entries(properties).find(([, propertySchema]) => propertySchema.type === "array");
+	const cursorEntry = Object.entries(properties).find(([name, propertySchema]) => {
+		if (propertySchema.type !== "string") return false;
+		const normalized = name.toLowerCase();
+		return (
+			normalized === "next_cursor" ||
+			normalized === "nextcursor" ||
+			normalized === "cursor" ||
+			normalized === "next_token"
+		);
+	});
+	const totalEntry = Object.entries(properties).find(([name, propertySchema]) => {
+		if (propertySchema.type !== "integer" && propertySchema.type !== "number") return false;
+		const normalized = name.toLowerCase();
+		return (
+			normalized === "total" ||
+			normalized === "total_count" ||
+			normalized === "totalcount" ||
+			normalized === "count"
+		);
+	});
+
+	return {
+		cursorPath: cursorEntry?.[0] ?? defaults.cursorPath,
+		totalPath: totalEntry?.[0] ?? defaults.totalPath,
+		itemsPath: arrayEntry?.[0] ?? defaults.itemsPath,
+	};
 }
 
 function isStreamingResponse(op: Operation): boolean {
