@@ -33,7 +33,9 @@ npx openapi-mcp-codegen generate -i https://petstore3.swagger.io/api/v3/openapi.
 # Hosted API with API-key auth
 npx openapi-mcp-codegen generate -i https://xquik.com/openapi.json -o ./xquik-mcp
 cd xquik-mcp && npm install && npm run build
+# macOS/Linux shells
 API_KEY="$XQUIK_API_KEY" npm start
+# Windows PowerShell: $env:API_KEY=$env:XQUIK_API_KEY; npm start
 
 # Preview tools without generating (dry run)
 npx openapi-mcp-codegen generate -i spec.yaml --dry-run
