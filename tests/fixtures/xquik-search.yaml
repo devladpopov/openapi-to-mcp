@@ -1,0 +1,78 @@
+openapi: 3.0.3
+info:
+  title: Xquik API
+  version: 1.0.0
+servers:
+  - url: https://xquik.com/api/v1
+paths:
+  /x/tweets/search:
+    get:
+      operationId: searchTweets
+      summary: Search tweets by query, Tweet ID, X status URL, or account date window
+      tags:
+        - Tweets
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Search query
+        - name: queryType
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [Latest, Top]
+            default: Latest
+          description: Sort order
+        - name: cursor
+          in: query
+          schema:
+            type: string
+          description: Pagination cursor from previous response
+        - name: sinceTime
+          in: query
+          schema:
+            type: string
+          description: ISO 8601 timestamp filter
+        - name: untilTime
+          in: query
+          schema:
+            type: string
+          description: ISO 8601 timestamp filter
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+            maximum: 200
+          description: Max tweets to return
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tweets:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        text:
+                          type: string
+                  has_next_page:
+                    type: boolean
+                  next_cursor:
+                    type: string
+components:
+  securitySchemes:
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key

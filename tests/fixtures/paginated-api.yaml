@@ -30,6 +30,10 @@ paths:
               schema:
                 type: object
                 properties:
+                  included:
+                    type: array
+                    items:
+                      type: object
                   items:
                     type: array
                     items:
@@ -52,6 +56,17 @@ paths:
       responses:
         "200":
           description: Paginated users
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                  total_count:
+                    type: integer
   /events:
     get:
       operationId: listEvents

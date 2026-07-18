@@ -4,6 +4,7 @@ import { mapToMcpTools } from "../src/mapper/index.js";
 import { resolve } from "node:path";
 
 const fixture = resolve(import.meta.dir, "fixtures/paginated-api.yaml");
+const xquikFixture = resolve(import.meta.dir, "fixtures/xquik-search.yaml");
 
 describe("pagination detection", () => {
 	test("detects offset-based pagination (limit + offset)", async () => {
@@ -15,6 +16,8 @@ describe("pagination detection", () => {
 		expect(listItems.meta.pagination!.type).toBe("offset");
 		expect(listItems.meta.pagination!.limitParam).toBe("limit");
 		expect(listItems.meta.pagination!.offsetParam).toBe("offset");
+		expect(listItems.meta.pagination!.itemsPath).toBe("items");
+		expect(listItems.meta.pagination!.totalPath).toBe("total");
 	});
 
 	test("detects page-based pagination (per_page + page)", async () => {
@@ -26,6 +29,8 @@ describe("pagination detection", () => {
 		expect(listUsers.meta.pagination!.type).toBe("page");
 		expect(listUsers.meta.pagination!.limitParam).toBe("per_page");
 		expect(listUsers.meta.pagination!.pageParam).toBe("page");
+		expect(listUsers.meta.pagination!.itemsPath).toBe("data");
+		expect(listUsers.meta.pagination!.totalPath).toBe("total_count");
 	});
 
 	test("detects cursor-based pagination (limit + after)", async () => {
@@ -96,5 +101,33 @@ describe("pagination detection", () => {
 
 		expect(listItems.meta.pagination).toBeNull();
 		expect(listItems.inputSchema.properties!.offset).toBeDefined();
+	});
+
+	test("infers item and cursor paths from paginated response schemas", async () => {
+		const spec = await parseSpec(xquikFixture);
+		const tools = mapToMcpTools(spec);
+		const searchTweets = tools.find((t) => t.name === "searchTweets")!;
+
+		expect(searchTweets.meta.pagination).not.toBeNull();
+		expect(searchTweets.meta.pagination!.type).toBe("cursor");
+		expect(searchTweets.meta.pagination!.cursorParam).toBe("cursor");
+		expect(searchTweets.meta.pagination!.cursorPath).toBe("next_cursor");
+		expect(searchTweets.meta.pagination!.itemsPath).toBe("tweets");
+	});
+
+	test("keeps real query filters while abstracting pagination inputs", async () => {
+		const spec = await parseSpec(xquikFixture);
+		const tools = mapToMcpTools(spec);
+		const searchTweets = tools.find((t) => t.name === "searchTweets")!;
+
+		expect([...searchTweets.meta.queryParams].sort()).toEqual(
+			["q", "queryType", "sinceTime", "untilTime"].sort(),
+		);
+		expect(searchTweets.inputSchema.required).toEqual(["q"]);
+		expect(searchTweets.inputSchema.properties!.queryType.enum).toEqual(["Latest", "Top"]);
+		expect(searchTweets.inputSchema.properties!.limit.type).toBe("integer");
+		expect(searchTweets.inputSchema.properties!.cursor.description).toBe(
+			"Opaque pagination cursor. Omit for first page.",
+		);
 	});
 });
