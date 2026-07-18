@@ -27,7 +27,7 @@
     "dev": "tsup --watch",
     "start": "node dist/cli.js",
     "test": "bun test",
-    "lint": "biome check src/",
+    "lint": "biome lint src/",
     "format": "biome format --write src/",
     "prepublishOnly": "npm run build"
   },
