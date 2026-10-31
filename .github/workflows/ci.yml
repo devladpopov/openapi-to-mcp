@@ -17,6 +17,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
@@ -27,16 +31,22 @@ jobs:
       - name: Typecheck
         run: bunx tsc --noEmit
 
-      - name: Run tests (includes e2e generate + install + tsc)
+      - name: Embedded runtime is up to date
+        run: bun scripts/embed-runtime.ts --check
+
+      - name: Lint
+        run: bunx biome lint src/
+
+      - name: Run tests (includes e2e generate + install + build + MCP client)
         run: bun test
 
       - name: Build
         run: bun run build
 
       - name: Smoke test CLI
-        run: node dist/cli.js generate -i tests/fixtures/petstore.yaml -o /tmp/smoke --name Smoke
+        run: node dist/cli.js generate -i tests/fixtures/petstore.yaml -o /tmp/smoke --name Smoke --target portable
         if: runner.os != 'Windows'
 
       - name: Smoke test CLI (Windows)
-        run: node dist/cli.js generate -i tests/fixtures/petstore.yaml -o "$env:TEMP\smoke" --name Smoke
+        run: node dist/cli.js generate -i tests/fixtures/petstore.yaml -o "$env:TEMP\smoke" --name Smoke --target portable
         if: runner.os == 'Windows'

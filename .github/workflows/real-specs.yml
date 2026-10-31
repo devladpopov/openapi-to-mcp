@@ -1,0 +1,21 @@
+name: Real-world specs
+
+# Downloads ~18 public OpenAPI specs (GitHub, Stripe, Slack, OpenAI, ...) and
+# checks every client target's schema rules plus a request dry-run per tool.
+# Weekly, because upstream specs change without notice.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun scripts/check-specs.ts
