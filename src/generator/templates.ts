@@ -75,6 +75,9 @@ export function renderEnvExample(opts: GenerateOptions): string {
 		"# MCP_TOOLS_INCLUDE=pets*,users               # names, tags or globs",
 		"# MCP_TOOLS_EXCLUDE=delete*",
 		"# MCP_TRANSPORT=streamable-http               # PORT=3000",
+		"# HOST=127.0.0.1                             # set 0.0.0.0 to expose, together with:",
+		"# MCP_AUTH_TOKEN=                             # clients send Authorization: Bearer <token>",
+		"# MCP_ALLOWED_HOSTS=mcp.example.com           # accepted Host/Origin besides localhost",
 	);
 	if (opts.webhooks?.length) {
 		lines.push(
@@ -84,6 +87,8 @@ export function renderEnvExample(opts: GenerateOptions): string {
 			"# WEBHOOK_HOST=127.0.0.1",
 			"# WEBHOOK_PUBLIC_URL=https://your-tunnel.example.com/webhooks",
 			"# WEBHOOK_SECRET=                             # verify HMAC signatures (GitHub, Stripe, Slack, generic)",
+			"# WEBHOOK_TOLERANCE_SECONDS=300               # reject older signed timestamps (replays)",
+			"# WEBHOOK_BUFFER_BYTES=52428800               # cap on buffered event payloads",
 		);
 	}
 	return `${lines.join("\n")}\n`;

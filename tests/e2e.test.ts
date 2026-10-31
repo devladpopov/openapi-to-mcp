@@ -223,14 +223,14 @@ describe("e2e: generated server builds and serves MCP", () => {
 				});
 				for (let i = 0; i < 2; i++) {
 					const client = new Client({ name: `http-${i}`, version: "1.0.0" });
-					await client.connect(new StreamableHTTPClientTransport(new URL(`http://localhost:${port}/mcp`)));
+					await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`)));
 					const { tools } = await client.listTools();
 					expect(tools.length).toBeGreaterThan(4);
 					const r = await client.callTool({ name: "getOrder", arguments: { id: "o1" } });
 					expect(r.isError).toBeFalsy();
 					await client.close();
 				}
-				const health = await fetch(`http://localhost:${port}/health`);
+				const health = await fetch(`http://127.0.0.1:${port}/health`);
 				expect((await health.json()).ok).toBe(true);
 			} finally {
 				child.kill();

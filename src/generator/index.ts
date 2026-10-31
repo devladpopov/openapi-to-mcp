@@ -113,6 +113,7 @@ export function toToolSpec(t: McpToolDefinition): Record<string, unknown> {
 		requiresAuth: m.requiresAuth ? undefined : false,
 		jsonArgs: m.jsonArgs,
 		looseArgs: m.looseArgs,
+		jsonAnyArgs: m.jsonAnyArgs,
 		queryStyles: m.queryStyles,
 		baseUrl: m.baseUrl,
 	};

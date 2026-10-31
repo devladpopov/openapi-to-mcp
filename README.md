@@ -148,8 +148,23 @@ The generated server reads these at startup:
 | `MCP_READ_ONLY=true` | Expose GET operations only |
 | `MCP_TOOLS_INCLUDE`, `MCP_TOOLS_EXCLUDE` | Comma-separated tool names, tags or globs (`repos_*,issues`) |
 | `MCP_TRANSPORT`, `PORT` | Switch to `streamable-http` without regenerating |
+| `HOST` | Interface for streamable HTTP, default `127.0.0.1` |
+| `MCP_AUTH_TOKEN` | Require `Authorization: Bearer <token>` on `/mcp` |
+| `MCP_ALLOWED_HOSTS` | Extra `Host`/`Origin` names accepted besides localhost (comma-separated) |
 | `MCP_TASKS` | `all` to offer Tasks for every tool, `off` to disable |
 | `API_TIMEOUT_MS`, `MAX_RESPONSE_CHARS`, `API_MAX_RETRIES` | Request timeout, response truncation, retry count |
+| `WEBHOOK_PORT`, `WEBHOOK_HOST`, `WEBHOOK_PUBLIC_URL`, `WEBHOOK_SECRET` | Webhook receiver (stdio mode) and signature verification |
+| `WEBHOOK_TOLERANCE_SECONDS`, `WEBHOOK_BUFFER_SIZE`, `WEBHOOK_BUFFER_BYTES` | Replay window for signed timestamps (300), buffered event count (500) and total size (50 MB) |
+
+### Security
+
+The generated server holds your API credentials, so it is locked down by default:
+
+- Streamable HTTP binds to `127.0.0.1` and rejects requests whose `Host` or `Origin` is not localhost (DNS rebinding). To expose it, set `HOST=0.0.0.0`, list your hostname in `MCP_ALLOWED_HOSTS` and set `MCP_AUTH_TOKEN`; the server warns at startup if it is reachable without a token.
+- Redirects are followed manually and credentials are dropped when a redirect leaves the original origin.
+- Path parameters are percent-encoded, so `../` cannot escape the operation path.
+- Webhook signatures are compared in constant time, Stripe/Slack timestamps older than `WEBHOOK_TOLERANCE_SECONDS` are rejected, and the event buffer is capped by count and bytes. Without `WEBHOOK_SECRET` signatures are not verified (a warning is printed).
+- The OAuth callback listens on `127.0.0.1` only.
 
 ## Pagination
 

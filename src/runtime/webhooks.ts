@@ -37,21 +37,29 @@ const FORWARDED_HEADERS = [
 ];
 
 export class WebhookStore {
-	private events: WebhookEvent[] = [];
+	private events: Array<WebhookEvent & { bytes: number }> = [];
+	private totalBytes = 0;
 	private nextId = 1;
 	private waiters = new Set<() => void>();
 	private listeners = new Set<(e: WebhookEvent) => void>();
 
-	constructor(private readonly capacity = Number.parseInt(process.env.WEBHOOK_BUFFER_SIZE ?? "500", 10)) {}
+	constructor(
+		private readonly capacity = Number.parseInt(process.env.WEBHOOK_BUFFER_SIZE ?? "500", 10),
+		private readonly maxBytes = Number.parseInt(process.env.WEBHOOK_BUFFER_BYTES ?? String(50 * 1024 * 1024), 10),
+	) {}
 
 	get lastId(): number {
 		return this.nextId - 1;
 	}
 
 	add(event: Omit<WebhookEvent, "id">): WebhookEvent {
-		const full = { id: this.nextId++, ...event };
-		this.events.push(full);
-		if (this.events.length > this.capacity) this.events.splice(0, this.events.length - this.capacity);
+		const full: WebhookEvent = { id: this.nextId++, ...event };
+		const bytes = JSON.stringify(full.payload ?? null).length;
+		this.events.push({ ...full, bytes });
+		this.totalBytes += bytes;
+		while (this.events.length > 1 && (this.events.length > this.capacity || this.totalBytes > this.maxBytes)) {
+			this.totalBytes -= this.events.shift()!.bytes;
+		}
 		for (const wake of this.waiters) wake();
 		for (const l of this.listeners) l(full);
 		return full;
@@ -64,7 +72,10 @@ export class WebhookStore {
 	}
 
 	list(filter: Filter, limit = 50): WebhookEvent[] {
-		return this.events.filter((e) => matches(e, filter)).slice(0, limit);
+		return this.events
+			.filter((e) => matches(e, filter))
+			.slice(0, limit)
+			.map(({ bytes: _bytes, ...e }) => e);
 	}
 
 	async wait(filter: Filter, timeoutMs: number, signal?: AbortSignal): Promise<WebhookEvent | null> {
@@ -227,7 +238,7 @@ export function verifySignature(secret: string, raw: Buffer, headers: Record<str
 			.split(",")
 			.filter((kv) => kv.startsWith("v1="))
 			.map((kv) => kv.slice(3));
-		if (!parts.t) return false;
+		if (!parts.t || !fresh(parts.t)) return false;
 		const expected = hmac(`${parts.t}.${raw.toString("utf-8")}`);
 		return sigs.some((s) => eqHex(expected, s));
 	}
@@ -235,7 +246,7 @@ export function verifySignature(secret: string, raw: Buffer, headers: Record<str
 	const slack = headers["x-slack-signature"];
 	if (slack) {
 		const ts = headers["x-slack-request-timestamp"] ?? "";
-		return slack.startsWith("v0=") && eqHex(hmac(`v0:${ts}:${raw.toString("utf-8")}`), slack.slice(3));
+		return fresh(ts) && slack.startsWith("v0=") && eqHex(hmac(`v0:${ts}:${raw.toString("utf-8")}`), slack.slice(3));
 	}
 
 	const generic = headers[(process.env.WEBHOOK_SIGNATURE_HEADER ?? "x-signature").toLowerCase()] ?? headers["x-webhook-signature"];
@@ -245,6 +256,13 @@ export function verifySignature(secret: string, raw: Buffer, headers: Record<str
 		return eqHex(expected, value) || safeEqual(expected, Buffer.from(value, "base64"));
 	}
 	return false;
+}
+
+/** Signed timestamps (Stripe, Slack) older than the tolerance are replays. */
+function fresh(unixSeconds: string): boolean {
+	const ts = Number(unixSeconds);
+	const tolerance = Number.parseInt(process.env.WEBHOOK_TOLERANCE_SECONDS ?? "300", 10);
+	return Number.isFinite(ts) && Math.abs(Date.now() / 1000 - ts) <= tolerance;
 }
 
 function safeEqual(a: Buffer, b: Buffer): boolean {

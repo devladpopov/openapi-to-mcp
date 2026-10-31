@@ -177,6 +177,8 @@ export interface McpToolDefinition {
 		jsonArgs?: string[];
 		/** Paths below which runtime validation is skipped (collapsed unions). */
 		looseArgs?: string[];
+		/** Untyped values sent as JSON strings; scalars are decoded too. */
+		jsonAnyArgs?: string[];
 		/** Non-default query serialization by wire name (OpenAPI style/explode). */
 		queryStyles?: Record<string, QueryStyle>;
 		/** Operation- or path-level server overriding the global base URL. */

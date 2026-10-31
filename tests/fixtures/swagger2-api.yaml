@@ -23,6 +23,11 @@ paths:
       operationId: listUsers
       parameters:
         - $ref: "#/parameters/limitParam"
+        - name: ids
+          in: query
+          type: array
+          items:
+            type: integer
       responses:
         "200":
           description: OK

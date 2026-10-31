@@ -51,6 +51,8 @@ export interface ToolSpec {
 	jsonArgs?: string[];
 	/** Paths not validated because the advertised schema is narrower than the API (collapsed unions). */
 	looseArgs?: string[];
+	/** Untyped values sent as JSON strings ("42" -> 42, "true" -> true). */
+	jsonAnyArgs?: string[];
 	/** Query serialization by wire name; default: repeat arrays, deepObject for objects. */
 	queryStyles?: Record<string, "csv" | "ssv" | "pipe" | "deep" | "flat">;
 	/** Operation-specific server (e.g. an uploads host); used unless API_BASE_URL is set. */

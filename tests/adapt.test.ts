@@ -87,7 +87,7 @@ describe("schema adaptation: generic", () => {
 });
 
 describe("schema adaptation: openai (strict-compatible)", () => {
-	const { schema, jsonPaths } = adapt("openai");
+	const { schema, jsonPaths, anyPaths } = adapt("openai");
 
 	test("every object is closed and lists all properties as required", () => {
 		walk(schema, (s) => {
@@ -107,7 +107,8 @@ describe("schema adaptation: openai (strict-compatible)", () => {
 	test("free-form objects and untyped arrays become JSON strings", () => {
 		expect(schema.properties!.metadata.type).toEqual(["string", "null"]);
 		expect(schema.properties!.tags.items!.type).toBe("string");
-		expect(jsonPaths).toEqual(expect.arrayContaining(["metadata", "tags.*", "extra"]));
+		expect(jsonPaths).toEqual(["metadata"]);
+		expect(anyPaths).toEqual(expect.arrayContaining(["tags.*", "extra"]));
 	});
 
 	test("no oneOf anywhere and only supported formats", () => {
@@ -119,7 +120,7 @@ describe("schema adaptation: openai (strict-compatible)", () => {
 });
 
 describe("schema adaptation: gemini", () => {
-	const { schema, jsonPaths } = adapt("gemini");
+	const { schema, jsonPaths, anyPaths } = adapt("gemini");
 
 	test("no unions, type arrays, additionalProperties or const", () => {
 		walk(schema, (s) => {
@@ -149,7 +150,8 @@ describe("schema adaptation: gemini", () => {
 		walk(schema, (s) => {
 			if (s.type === "object") expect(Object.keys(s.properties ?? {}).length).toBeGreaterThan(0);
 		});
-		expect(jsonPaths).toEqual(expect.arrayContaining(["metadata", "extra", "tags.*"]));
+		expect(jsonPaths).toContain("metadata");
+		expect(anyPaths).toEqual(expect.arrayContaining(["extra", "tags.*"]));
 	});
 
 	test("unsupported formats are dropped", () => {

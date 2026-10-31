@@ -10,6 +10,7 @@ import { parseSpec } from "../src/parser/index.js";
 import { appendQuery, buildRequest, executeTool, formEncode } from "../src/runtime/http.js";
 import type { ToolSpec } from "../src/runtime/types.js";
 import { decodeJsonArgs, validateArgs } from "../src/runtime/validate.js";
+import { PROFILES, adaptInputSchema } from "../src/schema/adapt.js";
 import { WebhookStore, callWebhookTool, verifySignature } from "../src/runtime/webhooks.js";
 
 interface Seen {
@@ -21,6 +22,7 @@ interface Seen {
 
 let server: ReturnType<typeof Bun.serve>;
 let base: string;
+let redirectTarget = "/";
 const seen: Seen[] = [];
 
 beforeAll(() => {
@@ -39,6 +41,8 @@ beforeAll(() => {
 				return Response.json({ results: offset >= 4 ? [] : [offset, offset + 1], total: 4 });
 			}
 			if (url.pathname === "/fail") return new Response("nope", { status: 404, statusText: "Not Found" });
+			if (url.pathname === "/redirect") return new Response(null, { status: 302, headers: { location: redirectTarget } });
+			if (url.pathname === "/echo-key") return Response.json({ key: req.headers.get("x-api-key") });
 			if (url.pathname === "/flaky") {
 				const n = seen.filter((s) => s.url.pathname === "/flaky").length;
 				return n < 2 ? new Response("slow down", { status: 429, headers: { "retry-after": "0" } }) : Response.json({ ok: true });
@@ -114,6 +118,51 @@ describe("validateArgs", () => {
 		expect(r.value).toEqual({ id: 1, meta: {} });
 	});
 
+	test("OpenAI-adapted schema accepts nulls for every optional field, including in arrays", () => {
+		const strict = adaptInputSchema(
+			{
+				type: "object",
+				required: ["id"],
+				properties: {
+					id: { type: "integer" },
+					note: { type: "string" },
+					items: { type: "array", items: { type: "object", properties: { a: { type: "string" }, b: { type: "string" } } } },
+				},
+			},
+			PROFILES.openai,
+		).schema;
+		const r = validateArgs(strict, { id: 1, note: null, items: [{ a: "x", b: null }] }, true);
+		expect(r.errors).toEqual([]);
+		expect(r.value).toEqual({ id: 1, items: [{ a: "x" }] });
+	});
+
+	test("values matching a union variant exactly are never coerced", () => {
+		const s = {
+			type: "object",
+			properties: {
+				ids: { anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }] },
+				n: { anyOf: [{ type: "string" }, { type: "integer" }] },
+				t: { type: ["string", "integer"] },
+			},
+		};
+		expect(validateArgs(s, { ids: ["a", "b"], n: 5, t: 7 }, false).value).toEqual({ ids: ["a", "b"], n: 5, t: 7 });
+		expect(validateArgs(s, { ids: "a", n: "5" }, false).value).toEqual({ ids: "a", n: "5" });
+	});
+
+	test("untyped JSON-string values decode scalars too", () => {
+		expect(decodeJsonArgs({ a: "42", b: "true", c: "plain", d: '"q"' }, [], ["a", "b", "c", "d"])).toEqual({
+			a: 42,
+			b: true,
+			c: "plain",
+			d: "q",
+		});
+	});
+
+	test("keys containing dots are escaped in paths", () => {
+		const out = decodeJsonArgs({ filters: { "created_at.after": '{"x":1}' } }, ["filters.created_at%2Eafter"]);
+		expect(out).toEqual({ filters: { "created_at.after": { x: 1 } } });
+	});
+
 	test("loose paths skip validation below collapsed unions", () => {
 		const s = { type: "object", properties: { msgs: { type: "array", items: { type: "object", properties: { content: { type: "array", items: { type: "object" } } } } } } };
 		const args = { msgs: [{ content: "plain text" }] };
@@ -176,6 +225,15 @@ describe("request building", () => {
 		expect(init.headers["Content-Type"]).toBe("application/json");
 	});
 
+	test("relative path segments are rejected", async () => {
+		const t = tool({ path: "/repos/{owner}/contents/{path}", pathParams: [["owner", "owner"], ["path", "path"]] });
+		await expect(buildRequest(t, { owner: "a", path: "../../../user/keys" }, opts())).rejects.toThrow("relative segments");
+		await expect(buildRequest(t, { owner: "..", path: "x" }, opts())).rejects.toThrow("relative segments");
+		expect((await buildRequest(t, { owner: "a", path: "docs/v1..2.md" }, opts())).url.pathname).toBe(
+			"/repos/a/contents/docs/v1..2.md",
+		);
+	});
+
 	test("GET requests carry no body or content type", async () => {
 		const { init } = await buildRequest(tool({}), {}, opts());
 		expect(init.body).toBeUndefined();
@@ -210,6 +268,27 @@ describe("execution against a mock API", () => {
 		const r = await executeTool(tool({ path: "/fail" }), {}, opts());
 		expect(r.isError).toBe(true);
 		expect(r.content[0]).toMatchObject({ type: "text", text: "HTTP 404 Not Found\nnope" });
+	});
+
+	test("credentials are not forwarded on cross-origin redirects", async () => {
+		const other = Bun.serve({
+			port: 0,
+			fetch: (req) => Response.json({ key: req.headers.get("x-api-key"), auth: req.headers.get("authorization") }),
+		});
+		try {
+			process.env.API_KEY = "secret";
+			const t = tool({ path: `/redirect` });
+			redirectTarget = `http://127.0.0.1:${other.port}/landing`;
+			const r = await executeTool(t, {}, { baseUrl: base, auth: { mode: "api-key", apiKeyName: "X-API-Key" } });
+			expect(JSON.parse(r.content[0].text as string)).toEqual({ key: null, auth: null });
+			// same-origin redirects keep them
+			redirectTarget = "/echo-key";
+			const same = await executeTool(t, {}, { baseUrl: base, auth: { mode: "api-key", apiKeyName: "X-API-Key" } });
+			expect(JSON.parse(same.content[0].text as string)).toEqual({ key: "secret" });
+		} finally {
+			delete process.env.API_KEY;
+			other.stop(true);
+		}
 	});
 
 	test("429 is retried using Retry-After", async () => {
@@ -286,9 +365,12 @@ describe("webhooks", () => {
 		const hex = (data: string | Buffer) => createHmac("sha256", secret).update(data).digest("hex");
 		expect(verifySignature(secret, body, { "x-hub-signature-256": `sha256=${hex(body)}` })).toBe(true);
 		expect(verifySignature(secret, body, { "x-hub-signature-256": "sha256=00" })).toBe(false);
-		expect(verifySignature(secret, body, { "stripe-signature": `t=1,v1=${hex(`1.${body}`)}` })).toBe(true);
+		const now = String(Math.floor(Date.now() / 1000));
+		expect(verifySignature(secret, body, { "stripe-signature": `t=${now},v1=${hex(`${now}.${body}`)}` })).toBe(true);
+		// Correctly signed but old: a replay
+		expect(verifySignature(secret, body, { "stripe-signature": `t=1,v1=${hex(`1.${body}`)}` })).toBe(false);
 		expect(
-			verifySignature(secret, body, { "x-slack-signature": `v0=${hex(`v0:9:${body}`)}`, "x-slack-request-timestamp": "9" }),
+			verifySignature(secret, body, { "x-slack-signature": `v0=${hex(`v0:${now}:${body}`)}`, "x-slack-request-timestamp": now }),
 		).toBe(true);
 		expect(verifySignature(secret, body, { "x-signature": hex(body) })).toBe(true);
 		expect(verifySignature(secret, body, {})).toBe(false);

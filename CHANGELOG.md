@@ -24,6 +24,14 @@
 - Streamable HTTP is stateless with a fresh server per request, so several clients can connect; `/health` endpoint added.
 - Tool names keep `-` and may use the full 64 characters.
 
+### Security
+
+- Streamable HTTP binds to `127.0.0.1` by default, checks `Host`/`Origin` against localhost plus `MCP_ALLOWED_HOSTS`, and supports a bearer token (`MCP_AUTH_TOKEN`).
+- Redirects no longer carry API keys or credentials to another origin.
+- Path parameters are percent-encoded (no `../` traversal into other endpoints).
+- Webhooks: replay window for Stripe/Slack timestamps (`WEBHOOK_TOLERANCE_SECONDS`), byte cap on the event buffer (`WEBHOOK_BUFFER_BYTES`), warning when `WEBHOOK_SECRET` is unset.
+- OAuth callback server listens on `127.0.0.1` only.
+
 ### Fixed
 
 - HTTP errors are returned as `isError` results with the status code; large responses are truncated; 429/503 are retried.

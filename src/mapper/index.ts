@@ -197,6 +197,7 @@ function mapOperation(
 			bodyMediaType: built.bodyMediaType,
 			jsonArgs: adapted.jsonPaths.length > 0 ? adapted.jsonPaths : undefined,
 			looseArgs: adapted.loosePaths.length > 0 ? adapted.loosePaths : undefined,
+			jsonAnyArgs: adapted.anyPaths.length > 0 ? adapted.anyPaths : undefined,
 			queryStyles: Object.keys(built.queryStyles).length > 0 ? built.queryStyles : undefined,
 			baseUrl,
 		},
@@ -315,7 +316,9 @@ function buildInputSchema(op: Operation, params: Parameter[], method: string, pa
 
 		const key = propertyKey(param.name, used, param.in === "header" ? "header_" : "");
 		used.add(key);
-		const schema = param.schema ?? firstJsonSchema(param.content) ?? { type: "string" };
+		let schema = param.schema ?? firstJsonSchema(param.content) ?? { type: "string" };
+		// A path segment can never be null, whatever the spec says.
+		if (param.in === "path") schema = nonNullable(schema);
 		properties[key] = {
 			...schema,
 			description: param.description ?? schema.description,
@@ -413,6 +416,21 @@ function queryStyle(param: Parameter, schema: JsonSchema): QueryStyle | null {
 	if (isArray && !explode) return "csv";
 	if (isObject) return explode ? "flat" : "csv";
 	return null;
+}
+
+function nonNullable(schema: JsonSchema): JsonSchema {
+	const { nullable: _n, ...rest } = mergeAllOf(schema);
+	if (Array.isArray(rest.type)) {
+		const types = rest.type.filter((t) => t !== "null");
+		rest.type = types.length === 1 ? types[0] : types;
+	}
+	const variants = rest.anyOf ?? rest.oneOf;
+	if (variants) {
+		const kept = variants.filter((v) => v?.type !== "null");
+		if (rest.anyOf) rest.anyOf = kept;
+		else rest.oneOf = kept;
+	}
+	return rest;
 }
 
 /** A body that can carry nothing: an object with no properties that forbids extra keys. */

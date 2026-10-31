@@ -204,14 +204,21 @@ async function authorizeInteractive(auth: AuthConfig): Promise<string> {
 				if (err) reject(err);
 				else resolve(receivedCode as string);
 			};
+			// Ignore requests that do not carry our state, so stray or hostile
+			// requests cannot abort the flow.
+			if (url.searchParams.get("state") !== state) {
+				res.writeHead(400, { "Content-Type": "text/plain" });
+				res.end("Invalid callback");
+				return;
+			}
 			if (error) {
-				res.writeHead(400);
+				res.writeHead(400, { "Content-Type": "text/plain" });
 				res.end(`Authorization error: ${error}`);
 				return finish(new Error(`OAuth error: ${error}`));
 			}
-			if (url.searchParams.get("state") !== state || !receivedCode) {
-				res.writeHead(400);
-				res.end("Invalid callback");
+			if (!receivedCode) {
+				res.writeHead(400, { "Content-Type": "text/plain" });
+				res.end("Missing authorization code");
 				return finish(new Error("Invalid OAuth callback"));
 			}
 			res.writeHead(200, { "Content-Type": "text/html" });
@@ -222,7 +229,7 @@ async function authorizeInteractive(auth: AuthConfig): Promise<string> {
 			clearTimeout(timer);
 			reject(err);
 		});
-		srv.listen(s.port, () => console.error(`Waiting for OAuth callback on port ${s.port}...`));
+		srv.listen(s.port, "127.0.0.1", () => console.error(`Waiting for OAuth callback on port ${s.port}...`));
 	});
 
 	tokenStore = await tokenRequest(s.tokenUrl, {

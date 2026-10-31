@@ -173,6 +173,13 @@ export interface AdaptedSchema {
 	 * validate below these paths.
 	 */
 	loosePaths: string[];
+	/** Like jsonPaths, for untyped values: JSON scalars ("42", "true") are decoded too. */
+	anyPaths: string[];
+}
+
+/** Path segment escaping shared with the runtime (src/runtime/validate.ts). */
+function seg(key: string): string {
+	return key.replace(/%/g, "%25").replace(/\./g, "%2E");
 }
 
 /** Adapt a tool's top-level input schema (always an object) to a client profile. */
@@ -190,21 +197,28 @@ export function adaptInputSchema(input: JsonSchema, profile: SchemaProfile): Ada
 function adaptOnce(input: JsonSchema, profile: SchemaProfile): AdaptedSchema {
 	const jsonPaths: string[] = [];
 	const loosePaths: string[] = [];
-	const ctx: Ctx = { profile, jsonPaths, loosePaths };
+	const anyPaths: string[] = [];
+	const ctx: Ctx = { profile, jsonPaths, loosePaths, anyPaths };
 	const properties: Record<string, JsonSchema> = {};
 	const required = new Set(input.required ?? []);
 	for (const [key, prop] of Object.entries(input.properties ?? {})) {
-		properties[key] = adaptNode(prop, ctx, 1, [key]);
+		properties[key] = adaptNode(prop, ctx, 1, [seg(key)]);
 	}
 	const out: JsonSchema = { type: "object", properties };
 	finishObject(out, required, ctx, true);
-	return { schema: out, jsonPaths: [...new Set(jsonPaths)], loosePaths: [...new Set(loosePaths)] };
+	return {
+		schema: out,
+		jsonPaths: [...new Set(jsonPaths)],
+		loosePaths: [...new Set(loosePaths)],
+		anyPaths: [...new Set(anyPaths)],
+	};
 }
 
 interface Ctx {
 	profile: SchemaProfile;
 	jsonPaths: string[];
 	loosePaths: string[];
+	anyPaths: string[];
 }
 
 function adaptNode(raw: JsonSchema, ctx: Ctx, depth: number, path: string[]): JsonSchema {
@@ -265,7 +279,7 @@ function adaptNode(raw: JsonSchema, ctx: Ctx, depth: number, path: string[]): Js
 		out.type = "object";
 		out.properties = {};
 		for (const [key, value] of entries) {
-			out.properties[key] = adaptNode(value, ctx, depth + 1, [...path, key]);
+			out.properties[key] = adaptNode(value, ctx, depth + 1, [...path, seg(key)]);
 		}
 		copyDescription(out, schema, profile);
 		finishObject(out, new Set(schema.required ?? []), ctx, false);
@@ -287,7 +301,7 @@ function adaptNode(raw: JsonSchema, ctx: Ctx, depth: number, path: string[]): Js
 	if (!type) {
 		// Untyped schema: any JSON value. Typed-only clients get a JSON string.
 		if (profile.freeFormObjects === "json-string") {
-			ctx.jsonPaths.push(path.join("."));
+			ctx.anyPaths.push(path.join("."));
 			return { type: "string", description: joinDescription(schema.description, "any JSON value", profile) };
 		}
 		copyDescription(out, schema, profile);
@@ -368,7 +382,7 @@ function opaque(schema: JsonSchema, ctx: Ctx, path: string[]): JsonSchema {
 function anyItems(ctx: Ctx, path: string[]): JsonSchema {
 	if (ctx.profile.freeFormObjects === "json-string") {
 		// OpenAI and Gemini both reject arrays without a typed `items`.
-		ctx.jsonPaths.push(path.join("."));
+		ctx.anyPaths.push(path.join("."));
 		return { type: "string", description: "JSON-encoded value" };
 	}
 	return {};

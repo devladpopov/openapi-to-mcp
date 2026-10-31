@@ -101,16 +101,17 @@ function checkTarget(target: ClientTarget, tools: McpToolDefinition[], serverNam
 }
 
 /** Minimal arguments satisfying `required`, to exercise the runtime request builder. */
-function sample(s: JsonSchema, depth = 0): unknown {
-	if (s.anyOf?.length) return sample(s.anyOf[0], depth);
+function sample(s: JsonSchema, depth = 0, preferNull = false): unknown {
+	if (preferNull && depth > 0 && typesOf(s).includes("null")) return null;
+	if (s.anyOf?.length) return sample(s.anyOf[0], depth, preferNull);
 	if (s.enum?.length) return s.enum.find((x) => x !== null) ?? s.enum[0];
 	const t = typesOf(s).find((x) => x !== "null");
 	if (t === "integer" || t === "number") return typeof s.minimum === "number" ? s.minimum : 1;
 	if (t === "boolean") return true;
-	if (t === "array") return s.items && depth < 12 ? [sample(s.items, depth + 1)] : [];
+	if (t === "array") return s.items && depth < 12 ? [sample(s.items, depth + 1, preferNull)] : [];
 	if (t === "object" || s.properties) {
 		const out: Record<string, unknown> = {};
-		if (depth < 12) for (const k of s.required ?? []) if (s.properties?.[k]) out[k] = sample(s.properties[k], depth + 1);
+		if (depth < 12) for (const k of s.required ?? []) if (s.properties?.[k]) out[k] = sample(s.properties[k], depth + 1, preferNull);
 		return out;
 	}
 	if (t === "string") {
@@ -122,17 +123,17 @@ function sample(s: JsonSchema, depth = 0): unknown {
 	return "x";
 }
 
-async function runtimeSmoke(tools: McpToolDefinition[], authMode: ReturnType<typeof detectAuth>, v: Violations) {
+async function runtimeSmoke(tools: McpToolDefinition[], authMode: ReturnType<typeof detectAuth>, v: Violations, nullAsAbsent = false) {
 	for (const def of tools) {
 		const tool = toToolSpec(def) as unknown as ToolSpec;
-		const args = sample(def.inputSchema) as Record<string, unknown>;
-		const { value, errors } = validateArgs(tool.inputSchema, args, false);
+		const args = sample(def.inputSchema, 0, nullAsAbsent) as Record<string, unknown>;
+		const { value, errors } = validateArgs(tool.inputSchema, args, nullAsAbsent, tool.looseArgs);
 		if (errors.length) {
-			flag(v, "runtime.sampleRejected", `${def.name}: ${errors[0]}`);
+			flag(v, `runtime${nullAsAbsent ? ".openai" : ""}.sampleRejected`, `${def.name}: ${errors[0]}`);
 			continue;
 		}
 		try {
-			const { url } = await buildRequest(tool, decodeJsonArgs(value, tool.jsonArgs), {
+			const { url } = await buildRequest(tool, decodeJsonArgs(value, tool.jsonArgs, tool.jsonAnyArgs), {
 				baseUrl: "https://api.example.test/v1",
 				auth: { mode: authMode.startsWith("oauth2") ? "bearer" : authMode, apiKeyName: "X-Key" },
 			});
@@ -172,6 +173,7 @@ for (const { name, file } of files) {
 			maxSchema = Math.max(...tools.map((t) => JSON.stringify(t.inputSchema).length), 0);
 			await runtimeSmoke(tools, auth, v);
 		}
+		if (target === "openai" || target === "gemini") await runtimeSmoke(tools, auth, v, target === "openai");
 		checkTarget(target, tools, spec.info.title, v);
 	}
 	const counts = (v as Violations & { counts?: Map<string, number> }).counts ?? new Map();

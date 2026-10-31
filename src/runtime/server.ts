@@ -9,8 +9,11 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { InMemoryTaskStore } from "@modelcontextprotocol/sdk/experimental/tasks/stores/in-memory.js";
 import {
 	CallToolRequestSchema,
+	ErrorCode,
 	ListResourcesRequestSchema,
+	ListTasksRequestSchema,
 	ListToolsRequestSchema,
+	McpError,
 	ReadResourceRequestSchema,
 	SubscribeRequestSchema,
 	UnsubscribeRequestSchema,
@@ -53,7 +56,7 @@ async function callTool(tool: ToolSpec, rawArgs: unknown, signal?: AbortSignal):
 	if (errors.length > 0) {
 		return errorResult(`Invalid arguments for ${tool.name}:\n- ${errors.join("\n- ")}`);
 	}
-	const args = decodeJsonArgs(value, tool.jsonArgs);
+	const args = decodeJsonArgs(value, tool.jsonArgs, tool.jsonAnyArgs);
 	try {
 		let result: ToolResult;
 		if (WEBHOOK_TOOL_NAMES.includes(tool.name) && !tool.method) {
@@ -107,19 +110,55 @@ function patterns(env: string | undefined): RegExp[] {
 const EVENTS_URI = "webhook://events";
 const taskStore = new InMemoryTaskStore();
 
+/**
+ * Run a task-augmented call in the background. The task outlives the request
+ * (and, over stateless HTTP, the server instance that created it), so results
+ * go straight to the shared store, and the work is aborted when the client
+ * cancels the task or its TTL expires.
+ */
+function runTask(taskId: string, tool: ToolSpec, args: unknown): void {
+	const controller = new AbortController();
+	const watcher = setInterval(async () => {
+		const current = await taskStore.getTask(taskId).catch(() => null);
+		if (!current || current.status === "cancelled") controller.abort();
+	}, 1000);
+	watcher.unref();
+	callTool(tool, args, controller.signal)
+		.then(async (result) => {
+			if (controller.signal.aborted) return;
+			await taskStore.storeTaskResult(taskId, result.isError ? "failed" : "completed", result);
+		})
+		.catch(async (err) => {
+			if (controller.signal.aborted) return;
+			await taskStore.storeTaskResult(taskId, "failed", errorResult(messageOf(err)));
+		})
+		.catch(() => {
+			// Task already finished, cancelled or expired: nothing left to report.
+		})
+		.finally(() => clearInterval(watcher));
+}
+
 /** One MCP server per connection (stdio) or per request (stateless Streamable HTTP). */
-function createMcpServer(): Server {
+function createMcpServer(shared: boolean): Server {
 	const server = new Server(
 		{ name: CONFIG.serverName, version: CONFIG.serverVersion },
 		{
 			capabilities: {
 				tools: {},
-				tasks: { list: {}, cancel: {}, requests: { tools: { call: {} } } },
+				// Over shared HTTP every client sees one store; listing would expose
+				// other callers' tasks, so only unguessable task ids give access.
+				tasks: { ...(shared ? {} : { list: {} }), cancel: {}, requests: { tools: { call: {} } } },
 				...(webhooks.length > 0 ? { resources: { subscribe: true } } : {}),
 			},
 			taskStore,
 		},
 	);
+
+	if (shared) {
+		server.setRequestHandler(ListTasksRequestSchema, async () => {
+			throw new McpError(ErrorCode.MethodNotFound, "tasks/list is disabled on shared HTTP servers");
+		});
+	}
 
 	server.setRequestHandler(ListToolsRequestSchema, async () => ({
 		tools: allTools.map((t): Tool => {
@@ -143,12 +182,11 @@ function createMcpServer(): Server {
 		const run = () => callTool(tool, request.params.arguments, extra.signal);
 
 		if (request.params.task && extra.taskStore && supportsTasks(tool)) {
-			const store = extra.taskStore;
-			const task = await store.createTask({ ttl: request.params.task.ttl ?? 60 * 60 * 1000, pollInterval: 2000 });
-			// The task outlives this request, so it must not be tied to the request's abort signal.
-			void callTool(tool, request.params.arguments)
-				.then((result) => store.storeTaskResult(task.taskId, result.isError ? "failed" : "completed", result))
-				.catch((err) => store.storeTaskResult(task.taskId, "failed", errorResult(messageOf(err))));
+			const task = await extra.taskStore.createTask({
+				ttl: request.params.task.ttl ?? 60 * 60 * 1000,
+				pollInterval: 2000,
+			});
+			runTask(task.taskId, tool, request.params.arguments);
 			return { task };
 		}
 		return run();
@@ -194,17 +232,53 @@ async function main() {
 	const transport = process.env.MCP_TRANSPORT ?? CONFIG.transport;
 	if (transport === "stdio") {
 		if (webhooks.length > 0) startWebhookServer(webhookStore, webhooks);
-		await createMcpServer().connect(new StdioServerTransport());
+		await createMcpServer(false).connect(new StdioServerTransport());
 		return;
 	}
 
 	// Streamable HTTP, stateless (no session ids): a fresh server + transport per request.
 	const port = Number.parseInt(process.env.PORT ?? "3000", 10);
+	// The server holds API credentials: bind to loopback unless told otherwise,
+	// and reject foreign Host/Origin headers (DNS rebinding from a web page).
+	const host = process.env.HOST ?? "127.0.0.1";
+	const authToken = process.env.MCP_AUTH_TOKEN;
+	const allowedHosts = new Set(
+		["localhost", "127.0.0.1", "[::1]", ...(process.env.MCP_ALLOWED_HOSTS ?? "").split(",")]
+			.map((h) => h.trim().toLowerCase())
+			.filter(Boolean),
+	);
+	const loopbackOnly = !process.env.MCP_ALLOWED_HOSTS && ["127.0.0.1", "localhost", "::1"].includes(host);
+	if (!loopbackOnly && !authToken) {
+		console.error("Warning: MCP endpoint is reachable from the network without MCP_AUTH_TOKEN");
+	}
+	if (webhooks.length > 0 && !process.env.WEBHOOK_SECRET) {
+		console.error("Warning: WEBHOOK_SECRET is not set, webhook signatures are not verified");
+	}
+	const hostAllowed = (value: string | undefined) => {
+		if (!value) return false;
+		try {
+			return allowedHosts.has(new URL(`http://${value}`).hostname.toLowerCase());
+		} catch {
+			return false;
+		}
+	};
+
 	const httpServer = createServer(async (req, res) => {
 		const url = new URL(req.url ?? "/", "http://localhost");
 		try {
 			if (url.pathname === "/mcp") {
-				const server = createMcpServer();
+				const origin = req.headers.origin;
+				if (loopbackOnly && (!hostAllowed(req.headers.host) || (origin && !hostAllowed(origin.replace(/^\w+:\/\//, ""))))) {
+					res.writeHead(403);
+					res.end("Forbidden host");
+					return;
+				}
+				if (authToken && req.headers.authorization !== `Bearer ${authToken}`) {
+					res.writeHead(401, { "WWW-Authenticate": "Bearer" });
+					res.end("Unauthorized");
+					return;
+				}
+				const server = createMcpServer(true);
 				const http = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
 				res.on("close", () => {
 					http.close().catch(() => {});
@@ -227,8 +301,8 @@ async function main() {
 			}
 		}
 	});
-	httpServer.listen(port, () => {
-		console.error(`MCP server listening on http://localhost:${port}/mcp`);
+	httpServer.listen(port, host, () => {
+		console.error(`MCP server listening on http://${host.includes(":") ? `[${host}]` : host}:${port}/mcp`);
 		if (webhooks.length > 0) console.error(`Webhook receiver at http://localhost:${port}/webhooks`);
 	});
 }

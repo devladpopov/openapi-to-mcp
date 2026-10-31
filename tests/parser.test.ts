@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { parseSpec } from "../src/parser/index.js";
+import { mapToMcpTools } from "../src/mapper/index.js";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -65,6 +66,11 @@ describe("parseSpec", () => {
 		const list = spec.paths["/users"].get!;
 		expect(list.parameters![0]).toMatchObject({ name: "limit", in: "query", schema: { type: "integer" } });
 		expect(list.responses!["200"].content!["application/json"].schema!.items!.properties!.id.type).toBe("integer");
+		// collectionFormat defaults to csv in Swagger 2
+		expect(list.parameters![1]).toMatchObject({ name: "ids", style: "form", explode: false });
+		const tools = mapToMcpTools(spec);
+		expect(tools.find((t) => t.name === "listUsers")!.meta.queryStyles).toEqual({ ids: "csv" });
+		expect(tools.find((t) => t.name === "createUser")!.inputSchema.properties!.id).toBeUndefined(); // readOnly
 	});
 
 	test("rejects unsupported versions", async () => {

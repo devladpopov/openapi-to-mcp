@@ -40,9 +40,16 @@ export async function buildRequest(
 	for (const [prop, wire] of tool.pathParams) {
 		const v = args[prop];
 		if (v === undefined || v === null || v === "") throw new Error(`Missing required path parameter '${prop}'`);
-		let encoded = encodeURIComponent(String(v));
+		const raw = String(v);
+		let encoded = encodeURIComponent(raw);
 		// File-path style parameters (GitHub contents/{path}) keep their slashes.
-		if (/path$/i.test(wire)) encoded = encoded.replace(/%2F/gi, "/");
+		const keepSlashes = /path$/i.test(wire);
+		if (keepSlashes) encoded = encoded.replace(/%2F/gi, "/");
+		// "." / ".." segments would be resolved by URL parsing and reach other endpoints.
+		const segments = keepSlashes ? raw.split("/") : [raw];
+		if (segments.some((s) => s === "." || s === "..")) {
+			throw new Error(`Invalid value for path parameter '${prop}': relative segments are not allowed`);
+		}
 		path = path.split(`{${wire}}`).join(encoded);
 	}
 	const base = ((opts.useToolBaseUrls !== false && tool.baseUrl) || opts.baseUrl).replace(/\/+$/, "");
@@ -171,11 +178,45 @@ export function formEncode(value: unknown, prefix = "", out = new URLSearchParam
 	return out;
 }
 
+const REDIRECTS = new Set([301, 302, 303, 307, 308]);
+
+/**
+ * fetch with manual redirects: fetch only strips Authorization and Cookie on
+ * cross-origin redirects, so API keys in custom headers or the query string
+ * would leak to e.g. a CDN. Cross-origin hops are followed without credentials.
+ */
+async function fetchFollowing(req: BuiltRequest, signal: AbortSignal): Promise<Response> {
+	let url = req.url;
+	let method = req.init.method ?? "GET";
+	let body = req.init.body;
+	let headers = { ...(req.init.headers as Record<string, string>) };
+	for (let hop = 0; hop < 5; hop++) {
+		const res = await fetch(url, { method, body, headers, redirect: "manual", signal });
+		const location = res.headers.get("location");
+		if (!REDIRECTS.has(res.status) || !location) return res;
+		await res.body?.cancel();
+		const next = new URL(location, url);
+		if (next.origin !== req.url.origin) {
+			const kept: Record<string, string> = { Accept: headers.Accept ?? "*/*" };
+			if (headers["Content-Type"]) kept["Content-Type"] = headers["Content-Type"];
+			headers = kept;
+		}
+		if (res.status === 303 || ((res.status === 301 || res.status === 302) && method !== "GET" && method !== "HEAD")) {
+			method = "GET";
+			body = undefined;
+			const { "Content-Type": _ct, ...rest } = headers;
+			headers = rest;
+		}
+		url = next;
+	}
+	throw new Error("Too many redirects");
+}
+
 async function send(req: BuiltRequest, opts: HttpOptions, timeoutMs: number): Promise<Response> {
 	for (let attempt = 0; ; attempt++) {
 		const signals = [AbortSignal.timeout(timeoutMs)];
 		if (opts.signal) signals.push(opts.signal);
-		const res = await fetch(req.url, { ...req.init, signal: AbortSignal.any(signals) });
+		const res = await fetchFollowing(req, AbortSignal.any(signals));
 		if ((res.status === 429 || res.status === 503) && attempt < MAX_RETRIES && retryable(req.init.body)) {
 			const wait = retryDelayMs(res.headers.get("retry-after"), attempt);
 			if (wait !== null) {

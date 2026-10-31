@@ -162,6 +162,14 @@ function convertParam(p: Obj): Obj {
 	if (p.description) out.description = p.description;
 	if (p.required) out.required = true;
 	out.schema = pickSchema(p);
+	// Swagger 2 arrays default to comma-separated (collectionFormat: csv).
+	if (p.type === "array" && p.in === "query") {
+		const format = (p.collectionFormat as string | undefined) ?? "csv";
+		if (format === "multi") out.explode = true;
+		else if (format === "ssv") Object.assign(out, { style: "spaceDelimited", explode: false });
+		else if (format === "pipes") Object.assign(out, { style: "pipeDelimited", explode: false });
+		else Object.assign(out, { style: "form", explode: false });
+	}
 	return out;
 }
 
