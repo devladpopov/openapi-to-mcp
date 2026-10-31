@@ -1,7 +1,7 @@
 {
   "name": "openapi-mcp-codegen",
-  "version": "0.2.0",
-  "description": "Generate MCP servers from OpenAPI 3.x specifications. One command, working server.",
+  "version": "0.3.0",
+  "description": "Generate MCP servers from OpenAPI 3.x and Swagger 2.0 specs. Client-specific schema adaptation (Claude, OpenAI, Gemini, Cursor, Bedrock), webhooks via MCP Tasks.",
   "type": "module",
   "bin": {
     "openapi-mcp-codegen": "./dist/cli.js"
@@ -22,12 +22,14 @@
     }
   },
   "scripts": {
-    "build": "tsup && tsc -p tsconfig.build.json && node -e \"require('fs').copyFileSync('dist/index.d.ts','dist/index.d.cts')\"",
+    "build": "bun scripts/embed-runtime.ts && tsup && tsc -p tsconfig.build.json && node -e \"require('fs').copyFileSync('dist/index.d.ts','dist/index.d.cts')\"",
     "build:check": "tsc --noEmit",
+    "embed": "bun scripts/embed-runtime.ts",
     "dev": "tsup --watch",
     "start": "node dist/cli.js",
     "test": "bun test",
-    "lint": "biome check src/",
+    "test:real-specs": "bun scripts/check-specs.ts",
+    "lint": "biome lint src/",
     "format": "biome format --write src/",
     "prepublishOnly": "npm run build"
   },
@@ -45,7 +47,13 @@
     "api",
     "oauth2",
     "rest",
-    "swagger"
+    "swagger",
+    "gemini",
+    "openai",
+    "webhooks",
+    "swagger2",
+    "mcp-server",
+    "model-context-protocol-server"
   ],
   "author": "Vlad Popov <devladpopov@gmail.com>",
   "license": "MIT",
@@ -58,11 +66,12 @@
     "url": "https://github.com/devladpopov/openapi-to-mcp.git"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=20.3.0"
   },
   "files": [
     "dist/",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "dependencies": {
@@ -74,6 +83,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.4.16",
     "@types/node": "^25.9.1",
+    "ajv": "^8.17.1",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3"
   }

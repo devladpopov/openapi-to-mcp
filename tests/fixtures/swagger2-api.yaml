@@ -1,0 +1,71 @@
+swagger: "2.0"
+info:
+  title: Legacy API
+  version: "2.0"
+host: api.legacy.example.com
+basePath: /v2
+schemes: [https]
+consumes: [application/json]
+produces: [application/json]
+securityDefinitions:
+  basicAuth:
+    type: basic
+security:
+  - basicAuth: []
+parameters:
+  limitParam:
+    name: limit
+    in: query
+    type: integer
+paths:
+  /users:
+    get:
+      operationId: listUsers
+      parameters:
+        - $ref: "#/parameters/limitParam"
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/User"
+    post:
+      operationId: createUser
+      parameters:
+        - name: body
+          in: body
+          required: true
+          schema:
+            $ref: "#/definitions/User"
+      responses:
+        "201":
+          description: Created
+  /files:
+    post:
+      operationId: uploadFile
+      consumes: [multipart/form-data]
+      parameters:
+        - name: file
+          in: formData
+          type: file
+          required: true
+        - name: label
+          in: formData
+          type: string
+      responses:
+        "200":
+          description: OK
+definitions:
+  User:
+    type: object
+    required: [name]
+    properties:
+      id:
+        type: integer
+        readOnly: true
+      name:
+        type: string
+      nickname:
+        type: string
+        x-nullable: true

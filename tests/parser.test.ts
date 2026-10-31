@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { parseSpec } from "../src/parser/index.js";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 
 const fixture = resolve(import.meta.dir, "fixtures/petstore.yaml");
 
@@ -52,10 +53,23 @@ describe("parseSpec", () => {
 		await expect(parseSpec(badFile)).rejects.toThrow("missing 'openapi' version field");
 	});
 
-	test("rejects OpenAPI 2.x (Swagger)", async () => {
-		// Create a temp swagger spec
-		const tmpFile = resolve(import.meta.dir, "fixtures/swagger2.yaml");
-		await Bun.write(tmpFile, 'swagger: "2.0"\ninfo:\n  title: Old\n  version: "1"\npaths: {}');
-		await expect(parseSpec(tmpFile)).rejects.toThrow("missing 'openapi' version field");
+	test("converts Swagger 2.0 to OpenAPI 3", async () => {
+		const spec = await parseSpec(resolve(import.meta.dir, "fixtures/swagger2-api.yaml"));
+		expect(spec.openapi).toBe("3.0.3");
+		expect(spec.servers![0].url).toBe("https://api.legacy.example.com/v2");
+		expect(spec.components!.securitySchemes!.basicAuth).toMatchObject({ type: "http", scheme: "basic" });
+		const create = spec.paths["/users"].post!;
+		expect(create.requestBody!.content["application/json"].schema!.properties!.name.type).toBe("string");
+		const upload = spec.paths["/files"].post!;
+		expect(Object.keys(upload.requestBody!.content)).toEqual(["multipart/form-data"]);
+		const list = spec.paths["/users"].get!;
+		expect(list.parameters![0]).toMatchObject({ name: "limit", in: "query", schema: { type: "integer" } });
+		expect(list.responses!["200"].content!["application/json"].schema!.items!.properties!.id.type).toBe("integer");
+	});
+
+	test("rejects unsupported versions", async () => {
+		const tmpFile = join(tmpdir(), `oas4-${Date.now()}.yaml`);
+		await Bun.write(tmpFile, 'openapi: "4.0.0"\ninfo:\n  title: Future\n  version: "1"\npaths: {}');
+		await expect(parseSpec(tmpFile)).rejects.toThrow("Unsupported OpenAPI version");
 	});
 });

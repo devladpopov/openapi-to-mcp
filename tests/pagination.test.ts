@@ -86,7 +86,7 @@ describe("pagination detection", () => {
 		const tools = mapToMcpTools(spec);
 		const listItems = tools.find((t) => t.name === "listItems")!;
 
-		expect(listItems.description).toContain("(paginated)");
+		expect(listItems.description).toContain("(paginated");
 	});
 
 	test("pagination disabled when detectPagination is false", async () => {

@@ -9,3 +9,4 @@ Thumbs.db
 coverage/
 .turbo/
 recent-messages.jsonl
+.cache/

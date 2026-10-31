@@ -1,11 +1,8 @@
-import { describe, expect, test, beforeEach, afterEach } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { parseSpec } from "../src/parser/index.js";
 import { mapToMcpTools } from "../src/mapper/index.js";
-import { generate } from "../src/generator/index.js";
 import { resolveRefs } from "../src/parser/refs.js";
-import { resolve, join } from "node:path";
-import { existsSync, readFileSync, rmSync, mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { resolve } from "node:path";
 import type { OpenApiSpec } from "../src/types.js";
 
 const fixture = resolve(import.meta.dir, "fixtures/complex-api.yaml");
@@ -27,7 +24,8 @@ describe("mapper: param locations and collisions", () => {
 		const tools = mapToMcpTools(spec);
 		const updateItem = tools.find((t) => t.name === "updateItem")!;
 
-		expect(updateItem.meta.queryParams).toEqual(["dry_run"]);
+		expect(updateItem.meta.queryParams).toEqual([["dry_run", "dry_run"]]);
+		expect(updateItem.meta.pathParams).toEqual([["id", "id"]]);
 		expect(updateItem.meta.bodyMode).toBe("fields");
 	});
 
@@ -91,99 +89,39 @@ describe("mapper: param locations and collisions", () => {
 	});
 });
 
-describe("generated code: query/body separation", () => {
-	let outputDir: string;
-
-	beforeEach(() => {
-		outputDir = mkdtempSync(join(tmpdir(), "openapi-to-mcp-sq-"));
-	});
-
-	afterEach(() => {
-		if (existsSync(outputDir)) rmSync(outputDir, { recursive: true });
-	});
-
-	async function generateCode(): Promise<string> {
+describe("adapted input schema quality (generic target)", () => {
+	async function updateItemSchema() {
 		const spec = await parseSpec(fixture);
-		const tools = mapToMcpTools(spec);
-		await generate({
-			tools, spec, outputDir,
-			serverName: "Complex", transport: "stdio", auth: "none",
-		});
-		return readFileSync(join(outputDir, "src/server.ts"), "utf-8");
+		return mapToMcpTools(spec).find((t) => t.name === "updateItem")!.inputSchema;
 	}
 
-	test("POST with query params appends query string", async () => {
-		const code = await generateCode();
-		expect(code).toContain('buildQuery(p, ["locale"])');
+	test("string enum kept", async () => {
+		const s = await updateItemSchema();
+		expect(s.properties!.status.enum).toEqual(["active", "archived"]);
+		expect(s.properties!.status.type).toBe("string");
 	});
 
-	test("body assembled from body params only, with collision mapping", async () => {
-		const code = await generateCode();
-		expect(code).toContain('pickBody(p, [["name","name"],["body_id","id"]');
+	test("numeric enum kept with integer type", async () => {
+		const s = await updateItemSchema();
+		expect(s.properties!.priority).toMatchObject({ type: "integer", enum: [1, 2, 3] });
 	});
 
-	test("path params are URL-encoded", async () => {
-		const code = await generateCode();
-		expect(code).toContain('encodeURIComponent(String(p["id"] ?? ""))');
+	test("nested object with nullable field uses type array", async () => {
+		const s = await updateItemSchema();
+		const metadata = s.properties!.metadata;
+		expect(metadata.properties!.color.type).toEqual(["string", "null"]);
+		expect(metadata.properties!.sizes.type).toBe("array");
+		expect(metadata.properties!.sizes.items!.properties!.value.type).toBe("number");
 	});
 
-	test("form-encoded body uses formEncode and form content type", async () => {
-		const code = await generateCode();
-		expect(code).toContain("formEncode(pickBody(p,");
-		expect(code).toContain('"Content-Type": "application/x-www-form-urlencoded"');
+	test("oneOf becomes anyOf", async () => {
+		const s = await updateItemSchema();
+		expect(s.properties!.variant.anyOf).toEqual([{ type: "string" }, { type: "integer" }]);
 	});
 
-	test("whole-body payload sent as-is", async () => {
-		const code = await generateCode();
-		expect(code).toContain('pickBody(p, [["body","*"]])');
-	});
-});
-
-describe("generated code: zod quality", () => {
-	let outputDir: string;
-
-	beforeEach(() => {
-		outputDir = mkdtempSync(join(tmpdir(), "openapi-to-mcp-zq-"));
-	});
-
-	afterEach(() => {
-		if (existsSync(outputDir)) rmSync(outputDir, { recursive: true });
-	});
-
-	async function generateCode(): Promise<string> {
-		const spec = await parseSpec(fixture);
-		const tools = mapToMcpTools(spec);
-		await generate({
-			tools, spec, outputDir,
-			serverName: "Complex", transport: "stdio", auth: "none",
-		});
-		return readFileSync(join(outputDir, "src/server.ts"), "utf-8");
-	}
-
-	test("string enum renders z.enum", async () => {
-		const code = await generateCode();
-		expect(code).toContain('z.enum(["active", "archived"])');
-	});
-
-	test("numeric enum renders literal union", async () => {
-		const code = await generateCode();
-		expect(code).toContain("z.union([z.literal(1), z.literal(2), z.literal(3)])");
-	});
-
-	test("nested object renders z.object with nullable field", async () => {
-		const code = await generateCode();
-		expect(code).toContain('"color": z.string().nullable().optional()');
-		expect(code).toContain('"sizes": z.array(z.object({');
-	});
-
-	test("oneOf renders z.union", async () => {
-		const code = await generateCode();
-		expect(code).toContain("z.union([z.string(), z.number().int()])");
-	});
-
-	test("integer renders z.number().int()", async () => {
-		const code = await generateCode();
-		expect(code).toContain("z.number().int()");
+	test("required lists path param and body required fields", async () => {
+		const s = await updateItemSchema();
+		expect(s.required).toEqual(["id", "name"]);
 	});
 });
 

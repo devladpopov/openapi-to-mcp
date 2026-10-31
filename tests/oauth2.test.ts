@@ -1,10 +1,8 @@
-import { describe, expect, test, beforeEach, afterEach } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { parseSpec } from "../src/parser/index.js";
-import { mapToMcpTools } from "../src/mapper/index.js";
-import { generate } from "../src/generator/index.js";
-import { resolve, join } from "node:path";
-import { existsSync, readFileSync, rmSync, mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { detectAuth, mapToMcpTools } from "../src/mapper/index.js";
+import { type Generated, generateFixture } from "./helpers.js";
+import { resolve } from "node:path";
 
 const fixture = resolve(import.meta.dir, "fixtures/oauth2-api.yaml");
 
@@ -36,90 +34,42 @@ describe("OAuth2 support", () => {
 	});
 });
 
-describe("OAuth2 auth-code generation", () => {
-	let outputDir: string;
-
-	beforeEach(() => {
-		outputDir = mkdtempSync(join(tmpdir(), "openapi-to-mcp-oauth-"));
-	});
-
+describe("OAuth2 generation", () => {
+	let gen: Generated | undefined;
 	afterEach(() => {
-		if (existsSync(outputDir)) rmSync(outputDir, { recursive: true });
+		gen?.cleanup();
+		gen = undefined;
 	});
 
-	test("generates OAuth2 auth code helper with PKCE", async () => {
-		const spec = await parseSpec(fixture);
-		const tools = mapToMcpTools(spec);
-		await generate({
-			tools,
-			spec,
-			outputDir,
-			serverName: "OAuth Test",
-			transport: "stdio",
-			auth: "oauth2-auth-code",
-		});
-
-		const code = readFileSync(join(outputDir, "src/server.ts"), "utf-8");
-		expect(code).toContain("generatePKCE");
-		expect(code).toContain("code_challenge");
-		expect(code).toContain("code_verifier");
-		expect(code).toContain("authorization_code");
-		expect(code).toContain("refresh_token");
-		expect(code).toContain("OAUTH_AUTH_URL");
-		expect(code).toContain("OAUTH_CLIENT_ID");
-	});
-
-	test("generates OAuth2 CC helper for client_credentials", async () => {
-		const spec = await parseSpec(fixture);
-		const tools = mapToMcpTools(spec);
-		await generate({
-			tools,
-			spec,
-			outputDir,
-			serverName: "OAuth CC Test",
-			transport: "stdio",
-			auth: "oauth2",
-		});
-
-		const code = readFileSync(join(outputDir, "src/server.ts"), "utf-8");
-		expect(code).toContain("client_credentials");
-		expect(code).toContain("OAUTH_TOKEN_URL");
-		expect(code).not.toContain("generatePKCE");
+	test("auth-code config carries URLs and scopes from spec flows", async () => {
+		gen = await generateFixture(fixture, { auth: "oauth2-auth-code" });
+		const config = gen.config();
+		expect(config).toContain('"mode": "oauth2-auth-code"');
+		expect(config).toContain("https://auth.example.com/authorize");
+		expect(config).toContain("https://auth.example.com/token");
+		const auth = gen.file("src/auth.ts");
+		for (const s of ["generatePKCE", "code_challenge", "code_verifier", "authorization_code", "refresh_token", "OAUTH_AUTH_URL"]) {
+			expect(auth).toContain(s);
+		}
 	});
 
 	test(".env.example has auth-code vars", async () => {
-		const spec = await parseSpec(fixture);
-		const tools = mapToMcpTools(spec);
-		await generate({
-			tools,
-			spec,
-			outputDir,
-			serverName: "Test",
-			transport: "stdio",
-			auth: "oauth2-auth-code",
-		});
-
-		const env = readFileSync(join(outputDir, ".env.example"), "utf-8");
+		gen = await generateFixture(fixture, { auth: "oauth2-auth-code" });
+		const env = gen.file(".env.example");
 		expect(env).toContain("OAUTH_AUTH_URL=");
 		expect(env).toContain("OAUTH_TOKEN_URL=");
 		expect(env).toContain("OAUTH_SCOPES=");
 		expect(env).toContain("OAUTH_REDIRECT_PORT=");
 	});
 
-	test("auth-code helper reads URLs from spec flows", async () => {
-		const spec = await parseSpec(fixture);
-		const tools = mapToMcpTools(spec);
-		await generate({
-			tools,
-			spec,
-			outputDir,
-			serverName: "Test",
-			transport: "stdio",
-			auth: "oauth2-auth-code",
-		});
+	test("client credentials config", async () => {
+		gen = await generateFixture(fixture, { auth: "oauth2" });
+		expect(gen.config()).toContain('"mode": "oauth2"');
+		expect(gen.file(".env.example")).toContain("OAUTH_TOKEN_URL=");
+	});
 
-		const code = readFileSync(join(outputDir, "src/server.ts"), "utf-8");
-		expect(code).toContain("https://auth.example.com/authorize");
-		expect(code).toContain("https://auth.example.com/token");
+	test("detectAuth prefers authorization code flow", async () => {
+		const spec = await parseSpec(fixture);
+		expect(detectAuth(spec)).toBe("oauth2-auth-code");
 	});
 });
